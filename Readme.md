@@ -41,9 +41,11 @@ cd CyberSage-2.0
 # Run setup script (Linux/Mac)
 chmod +x setup.sh
 ./setup.sh
+```
 
 # Or manual setup:
 
+```
 # Backend
 cd backend
 python3 -m venv venv
