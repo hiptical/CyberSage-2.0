@@ -11,7 +11,6 @@ const Dashboard = () => {
   const [socket, setSocket] = useState(null);
   const [connected, setConnected] = useState(false);
   const [scanStatus, setScanStatus] = useState('idle');
-  const [currentScanId, setCurrentScanId] = useState(null);
   const [progress, setProgress] = useState(0);
   const [currentPhase, setCurrentPhase] = useState('');
   const [vulnerabilities, setVulnerabilities] = useState([]);

@@ -1,5 +1,6 @@
-// StatsCards.jsx
-export const StatsCards = ({ stats, chains }) => {
+import React from 'react';
+
+const StatsCards = ({ stats, chains }) => {
   const statCards = [
     { title: 'Critical', count: stats.critical, color: 'from-red-500 to-pink-500', icon: '🔴' },
     { title: 'High', count: stats.high, color: 'from-orange-500 to-yellow-500', icon: '🟠' },
@@ -29,3 +30,5 @@ export const StatsCards = ({ stats, chains }) => {
     </div>
   );
 };
+
+export default StatsCards;
