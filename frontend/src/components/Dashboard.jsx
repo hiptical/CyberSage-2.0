@@ -1,11 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { io } from 'socket.io-client';
 import ScanControl from './ScanControl';
-import VulnerabilityFeed from './VulnerabilityFeed';
-import ChainAlerts from './ChainAlerts';
-import ToolActivity from './ToolActivity';
-import StatsCards from './StatsCards';
-import ProgressBar from './ProgressBar';
+import { VulnerabilityFeed, ChainAlerts, ToolActivity, StatsCards, ProgressBar } from './Additional Components';
 
 const Dashboard = () => {
   const [socket, setSocket] = useState(null);
