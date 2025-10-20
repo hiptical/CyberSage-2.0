@@ -48,7 +48,6 @@ const Dashboard = () => {
 
     newSocket.on('scan_started', (data) => {
       console.log('Scan started:', data);
-      setCurrentScanId(data.scan_id);
       setScanStatus('running');
       setProgress(0);
       setVulnerabilities([]);

@@ -1,5 +1,6 @@
-// ToolActivity.jsx
-export const ToolActivity = ({ activity }) => {
+import React from 'react';
+
+const ToolActivity = ({ activity }) => {
   return (
     <div className="bg-gray-800 rounded-lg border border-gray-700 p-6">
       <h2 className="text-xl font-bold text-white mb-4 flex items-center">
@@ -38,3 +39,5 @@ export const ToolActivity = ({ activity }) => {
     </div>
   );
 };
+
+export default ToolActivity;

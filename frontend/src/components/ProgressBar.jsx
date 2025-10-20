@@ -1,5 +1,6 @@
-// ProgressBar.jsx
-export const ProgressBar = ({ progress, phase }) => {
+import React from 'react';
+
+const ProgressBar = ({ progress, phase }) => {
   return (
     <div className="bg-gray-800 rounded-lg p-6 border border-purple-500/30">
       <div className="flex justify-between mb-3">
@@ -20,10 +21,4 @@ export const ProgressBar = ({ progress, phase }) => {
   );
 };
 
-export default {
-  VulnerabilityFeed,
-  ChainAlerts,
-  ToolActivity,
-  StatsCards,
-  ProgressBar
-};
+export default ProgressBar;
