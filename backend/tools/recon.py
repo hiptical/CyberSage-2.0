@@ -175,7 +175,7 @@ class ReconEngine:
     
     def _discover_endpoints(self, scan_id, target):
         """
-        Discover endpoints through crawling
+        Enhanced endpoint discovery through aggressive crawling
         """
         endpoints = set()
         
@@ -183,35 +183,70 @@ class ReconEngine:
             # Simple crawler
             response = requests.get(target, timeout=10, verify=False)
             
-            # Extract links from HTML
+            # Extract ALL links from HTML
             import re
-            links = re.findall(r'href=["\']([^"\']+)["\']', response.text)
+            
+            # Find href links
+            links = re.findall(r'href=["\']([^"\']+)["\']', response.text, re.IGNORECASE)
+            
+            # Find src attributes
+            src_links = re.findall(r'src=["\']([^"\']+)["\']', response.text, re.IGNORECASE)
+            links.extend(src_links)
+            
+            # Find action attributes in forms
+            action_links = re.findall(r'action=["\']([^"\']+)["\']', response.text, re.IGNORECASE)
+            links.extend(action_links)
+            
+            # Find AJAX endpoints in JavaScript
+            ajax_endpoints = re.findall(r'["\']([^"\']*\.php[^"\']*)["\']', response.text)
+            links.extend(ajax_endpoints)
+            
+            # Find API endpoints
+            api_endpoints = re.findall(r'["\']([^"\']*api[^"\']*)["\']', response.text, re.IGNORECASE)
+            links.extend(api_endpoints)
             
             for link in links:
+                if not link or link.startswith('#') or link.startswith('javascript:'):
+                    continue
+                
                 if link.startswith('/'):
-                    endpoints.add(f"{target.rstrip('/')}{link}")
+                    full_url = f"{target.rstrip('/')}{link}"
+                    endpoints.add(full_url)
                 elif link.startswith('http'):
                     if urlparse(target).netloc in link:
                         endpoints.add(link)
+                else:
+                    # Relative URL
+                    full_url = urljoin(target, link)
+                    if urlparse(target).netloc in full_url:
+                        endpoints.add(full_url)
             
-            # Add common endpoints
-            common_endpoints = [
+            # Add common endpoints for testing platforms like testphp.vulnweb.com
+            common_paths = [
+                '/search.php', '/login.php', '/artists.php', '/listproducts.php',
+                '/showimage.php', '/product.php', '/cart.php', '/guestbook.php',
+                '/comment.php', '/userinfo.php', '/categories.php', '/details.php',
+                '/index.php', '/admin.php', '/upload.php', '/download.php',
                 '/api/v1', '/api', '/admin', '/login', '/dashboard',
-                '/api/users', '/api/auth', '/graphql', '/.git', '/.env'
+                '/api/users', '/api/auth', '/graphql', '/.git', '/.env',
+                '/logout.php', '/register.php', '/profile.php', '/edit.php',
+                '/delete.php', '/update.php', '/view.php', '/page.php'
             ]
             
-            for ep in common_endpoints:
-                full_url = f"{target.rstrip('/')}{ep}"
+            for path in common_paths:
+                full_url = f"{target.rstrip('/')}{path}"
                 try:
-                    resp = requests.head(full_url, timeout=3, verify=False)
-                    if resp.status_code != 404:
+                    # Quick HEAD request to check if endpoint exists
+                    resp = requests.head(full_url, timeout=3, verify=False, allow_redirects=True)
+                    if resp.status_code not in [404, 410]:
                         endpoints.add(full_url)
                 except:
-                    pass
+                    # Even if HEAD fails, add it anyway for GET testing
+                    endpoints.add(full_url)
         except:
             pass
         
-        return list(endpoints)[:100]  # Limit to 100 endpoints
+        return list(endpoints)[:200]  # Increased limit to 200 endpoints
     
     def _detect_auth(self, target):
         """
