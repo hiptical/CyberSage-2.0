@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { io } from 'socket.io-client';
+import { useWebSocket } from '../hooks/useWebSocket';
 import ScanControl from './ScanControl';
 import VulnerabilityFeed from './VulnerabilityFeed';
 import ChainAlerts from './ChainAlerts';
@@ -8,8 +8,7 @@ import StatsCards from './StatsCards';
 import ProgressBar from './ProgressBar';
 
 const Dashboard = () => {
-  const [socket, setSocket] = useState(null);
-  const [connected, setConnected] = useState(false);
+  const { socket, connected } = useWebSocket();
   const [scanStatus, setScanStatus] = useState('idle');
   const [progress, setProgress] = useState(0);
   const [currentPhase, setCurrentPhase] = useState('');
@@ -24,29 +23,13 @@ const Dashboard = () => {
   });
 
   useEffect(() => {
-    // Connect to WebSocket
-    const newSocket = io('http://localhost:5000/scan', {
-      transports: ['websocket'],
-      reconnection: true,
-      reconnectionDelay: 1000,
-      reconnectionAttempts: 5
-    });
+    if (!socket) return;
 
-    newSocket.on('connect', () => {
-      console.log('✅ Connected to CyberSage backend');
-      setConnected(true);
-    });
-
-    newSocket.on('disconnect', () => {
-      console.log('❌ Disconnected from backend');
-      setConnected(false);
-    });
-
-    newSocket.on('connected', (data) => {
+    socket.on('connected', (data) => {
       console.log('Backend ready:', data);
     });
 
-    newSocket.on('scan_started', (data) => {
+    socket.on('scan_started', (data) => {
       console.log('Scan started:', data);
       setScanStatus('running');
       setProgress(0);
@@ -56,12 +39,12 @@ const Dashboard = () => {
       setStats({ critical: 0, high: 0, medium: 0, low: 0 });
     });
 
-    newSocket.on('scan_progress', (data) => {
+    socket.on('scan_progress', (data) => {
       setProgress(data.progress);
       setCurrentPhase(data.phase);
     });
 
-    newSocket.on('tool_started', (data) => {
+    socket.on('tool_started', (data) => {
       setToolActivity(prev => [{
         tool: data.tool,
         target: data.target,
@@ -70,7 +53,7 @@ const Dashboard = () => {
       }, ...prev].slice(0, 10));
     });
 
-    newSocket.on('tool_completed', (data) => {
+    socket.on('tool_completed', (data) => {
       setToolActivity(prev => 
         prev.map(item => 
           item.tool === data.tool 
@@ -80,7 +63,7 @@ const Dashboard = () => {
       );
     });
 
-    newSocket.on('vulnerability_found', (data) => {
+    socket.on('vulnerability_found', (data) => {
       const newVuln = {
         ...data,
         id: Date.now() + Math.random()
@@ -88,17 +71,15 @@ const Dashboard = () => {
       
       setVulnerabilities(prev => [newVuln, ...prev]);
       
-      // Update stats
       setStats(prev => ({
         ...prev,
         [data.severity]: prev[data.severity] + 1
       }));
       
-      // Show notification
       showNotification(data);
     });
 
-    newSocket.on('chain_detected', (data) => {
+    socket.on('chain_detected', (data) => {
       const newChain = {
         ...data,
         id: Date.now() + Math.random()
@@ -108,31 +89,36 @@ const Dashboard = () => {
       showChainNotification(data);
     });
 
-    newSocket.on('scan_completed', (data) => {
+    socket.on('scan_completed', (data) => {
       console.log('Scan completed:', data);
       setScanStatus('completed');
       setProgress(100);
       showCompletionNotification(data);
     });
 
-    newSocket.on('scan_error', (data) => {
+    socket.on('scan_error', (data) => {
       console.error('Scan error:', data);
       setScanStatus('error');
       alert(`Scan error: ${data.error}`);
     });
 
-    setSocket(newSocket);
-
     return () => {
-      newSocket.close();
+      socket.off('connected');
+      socket.off('scan_started');
+      socket.off('scan_progress');
+      socket.off('tool_started');
+      socket.off('tool_completed');
+      socket.off('vulnerability_found');
+      socket.off('chain_detected');
+      socket.off('scan_completed');
+      socket.off('scan_error');
     };
-  }, []);
+  }, [socket]);
 
   const showNotification = (vuln) => {
     if ('Notification' in window && Notification.permission === 'granted') {
       new Notification('🔍 Vulnerability Found', {
         body: `${vuln.severity.toUpperCase()}: ${vuln.title}`,
-        icon: '/logo.png'
       });
     }
   };
@@ -141,7 +127,6 @@ const Dashboard = () => {
     if ('Notification' in window && Notification.permission === 'granted') {
       new Notification('⚠️ Attack Chain Detected!', {
         body: chain.name,
-        icon: '/logo.png',
         requireInteraction: true
       });
     }
@@ -151,14 +136,12 @@ const Dashboard = () => {
     if ('Notification' in window && Notification.permission === 'granted') {
       new Notification('✅ Scan Complete', {
         body: `Found ${data.results_summary?.vulnerabilities_count || 0} vulnerabilities`,
-        icon: '/logo.png'
       });
     }
   };
 
   const startScan = (target, mode) => {
     if (socket && connected) {
-      // Request notification permission
       if ('Notification' in window && Notification.permission === 'default') {
         Notification.requestPermission();
       }
@@ -168,7 +151,7 @@ const Dashboard = () => {
         mode: mode
       });
     } else {
-      alert('Not connected to backend. Please refresh the page.');
+      alert('Not connected to backend. Please check the connection.');
     }
   };
 
@@ -199,6 +182,15 @@ const Dashboard = () => {
             </div>
           </div>
         </div>
+
+        {/* Connection Warning */}
+        {!connected && (
+          <div className="mb-8 bg-red-900/30 border border-red-500 rounded-lg p-4">
+            <p className="text-red-400 font-medium">
+              ⚠️ Not connected to backend. Make sure the backend is running on http://localhost:5000
+            </p>
+          </div>
+        )}
 
         {/* Scan Control */}
         <div className="mb-8">
