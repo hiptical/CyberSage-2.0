@@ -177,48 +177,6 @@ Edit `backend/tools/vuln_scanner.py` to:
 
 ---
 
-## 🎯 For Competition Day (October 30)
-
-### Pre-Competition Checklist
-
-1. ✅ Test all features thoroughly
-2. ✅ Prepare demo targets (use intentionally vulnerable apps)
-3. ✅ Practice explaining each feature
-4. ✅ Have backup of the entire project
-5. ✅ Test on competition network/machine
-
-### Recommended Demo Flow
-
-1. **Introduction** (1 min)
-   - Show the dashboard
-   - Explain the real-time capabilities
-
-2. **Quick Scan Demo** (3 mins)
-   - Scan a vulnerable target
-   - Show live vulnerability detection
-   - Highlight the UI animations
-
-3. **Advanced Features** (3 mins)
-   - Demonstrate attack chain detection
-   - Show AI-powered insights
-   - Explain confidence scoring
-
-4. **Technical Deep Dive** (2 mins)
-   - Show the architecture
-   - Explain the modular design
-   - Highlight unique features
-
-5. **Q&A** (1 min)
-
-### Demo Targets
-
-Use these safe, intentionally vulnerable applications:
-- https://testphp.vulnweb.com
-- http://testhtml5.vulnweb.com
-- DVWA (Damn Vulnerable Web Application)
-- WebGoat
-
----
 
 ## 🛠️ Troubleshooting
 
