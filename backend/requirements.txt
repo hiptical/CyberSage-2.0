@@ -1,37 +1,12 @@
-# Development Dependencies for CyberSage v2.0
-
-# Testing
-pytest==7.4.3
-pytest-cov==4.1.0
-pytest-mock==3.12.0
-pytest-asyncio==0.21.1
-
-# Code Quality
-black==23.12.1
-flake8==6.1.0
-pylint==3.0.3
-mypy==1.7.1
-isort==5.13.2
-
-# Security
-bandit==1.7.5
-safety==2.3.5
-
-# Documentation
-sphinx==7.2.6
-sphinx-rtd-theme==2.0.0
-
-# Debugging
-ipython==8.18.1
-ipdb==0.13.13
-
-# Performance Profiling
-memory-profiler==0.61.0
-# line-profiler removed due to Cython compatibility issues with Python 3.12
-
-# HTTP Testing
-httpretty==1.1.7
-responses==0.24.1
-
-# Load Testing
-locust==2.20.0
+Flask==3.0.0
+flask-socketio==5.3.6
+flask-cors==4.0.0
+python-socketio==5.11.0
+requests==2.31.0
+pyyaml==6.0.1
+python-dotenv==1.0.0
+urllib3==2.1.0
+selenium==4.15.2
+webdriver-manager==4.0.1
+reportlab==4.0.7
+jinja2==3.1.2

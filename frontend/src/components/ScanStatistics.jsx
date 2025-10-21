@@ -1,19 +1,12 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 
 const ScanStatistics = ({ scanId }) => {
   const [statistics, setStatistics] = useState({});
   const [loading, setLoading] = useState(false);
-  const [timeRange, setTimeRange] = useState('all');
   
   const backendUrl = process.env.REACT_APP_BACKEND_URL || `${window.location.protocol}//${window.location.hostname}:5000`;
 
-  useEffect(() => {
-    if (scanId) {
-      fetchStatistics();
-    }
-  }, [scanId, timeRange]);
-
-  const fetchStatistics = async () => {
+  const fetchStatistics = useCallback(async () => {
     setLoading(true);
     try {
       const response = await fetch(`${backendUrl}/api/scan/${scanId}/statistics`);
@@ -24,7 +17,13 @@ const ScanStatistics = ({ scanId }) => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [backendUrl, scanId]);
+
+  useEffect(() => {
+    if (scanId) {
+      fetchStatistics();
+    }
+  }, [scanId, fetchStatistics]);
 
   const formatNumber = (num) => {
     if (num === null || num === undefined) return '0';
@@ -332,4 +331,3 @@ const ScanStatistics = ({ scanId }) => {
 };
 
 export default ScanStatistics;
-
