@@ -36,6 +36,7 @@
 
 ```bash
 # Clone or extract the project
+git clone https://github.com/AsHfIEXE/CyberSage-2.0
 cd CyberSage-2.0
 
 # Run setup script (Linux/Mac)
