@@ -44,6 +44,9 @@ fi
 echo "Installing Python dependencies..."
 source venv/bin/activate
 pip install --upgrade pip
+
+# Install main requirements (not dev requirements to avoid line_profiler issue)
+echo "Installing production dependencies..."
 pip install -r requirements.txt
 
 # Create .env file if it doesn't exist
@@ -54,6 +57,8 @@ SECRET_KEY=cybersage_v2_secret_$(date +%s)
 # OPENROUTER_API_KEY=your_api_key_here
 EOF
     echo "✅ .env file created"
+else
+    echo "✅ .env file already exists"
 fi
 
 deactivate
@@ -68,62 +73,90 @@ cd frontend
 echo "Installing Node.js dependencies..."
 npm install
 
-# Create postcss.config.js if it doesn't exist
-if [ ! -f "postcss.config.js" ]; then
-    cat > postcss.config.js << EOF
-module.exports = {
-  plugins: {
-    tailwindcss: {},
-    autoprefixer: {},
-  },
-}
+# Create .env file if it doesn't exist
+if [ ! -f ".env" ]; then
+    echo "Creating frontend .env file..."
+    cat > .env << EOF
+REACT_APP_BACKEND_URL=http://localhost:5000
 EOF
-    echo "✅ PostCSS config created"
+    echo "✅ Frontend .env file created"
+else
+    echo "✅ Frontend .env file already exists"
 fi
 
 cd ..
 
-# Create start scripts
+# Create start scripts if they don't exist
 echo ""
 echo "📝 Creating start scripts..."
 
 # Backend start script
-cat > start_backend.sh << 'EOF'
+if [ ! -f "start_backend.sh" ]; then
+    cat > start_backend.sh << 'EOF'
 #!/bin/bash
 cd backend
 source venv/bin/activate
 python app.py
 EOF
-chmod +x start_backend.sh
+    chmod +x start_backend.sh
+    echo "✅ Created start_backend.sh"
+fi
 
 # Frontend start script
-cat > start_frontend.sh << 'EOF'
+if [ ! -f "start_frontend.sh" ]; then
+    cat > start_frontend.sh << 'EOF'
 #!/bin/bash
 cd frontend
 npm start
 EOF
-chmod +x start_frontend.sh
+    chmod +x start_frontend.sh
+    echo "✅ Created start_frontend.sh"
+fi
 
 # Combined start script
-cat > start.sh << 'EOF'
+if [ ! -f "start.sh" ]; then
+    cat > start.sh << 'EOF'
 #!/bin/bash
+
 echo "🚀 Starting CyberSage v2.0..."
 echo ""
+
+# Check if virtual environment exists
+if [ ! -d "backend/venv" ]; then
+    echo "❌ Virtual environment not found. Please run ./setup.sh first"
+    exit 1
+fi
 
 # Start backend in background
 echo "Starting backend..."
 cd backend
 source venv/bin/activate
+
+# Check if Flask is installed
+python -c "import flask" 2>/dev/null
+if [ $? -ne 0 ]; then
+    echo "❌ Flask not installed. Installing dependencies..."
+    pip install -r requirements.txt
+fi
+
 python app.py &
 BACKEND_PID=$!
 cd ..
 
 # Wait for backend to start
-sleep 3
+echo "Waiting for backend to initialize..."
+sleep 5
 
 # Start frontend
 echo "Starting frontend..."
 cd frontend
+
+# Check if node_modules exists
+if [ ! -d "node_modules" ]; then
+    echo "❌ Node modules not found. Installing..."
+    npm install
+fi
+
 npm start &
 FRONTEND_PID=$!
 cd ..
@@ -139,11 +172,24 @@ echo ""
 echo "Press Ctrl+C to stop both servers"
 echo ""
 
+# Function to cleanup on exit
+cleanup() {
+    echo ""
+    echo "Stopping servers..."
+    kill $BACKEND_PID 2>/dev/null
+    kill $FRONTEND_PID 2>/dev/null
+    exit 0
+}
+
+# Trap Ctrl+C
+trap cleanup INT
+
 # Wait for interrupt
-trap "kill $BACKEND_PID $FRONTEND_PID; exit" INT
 wait
 EOF
-chmod +x start.sh
+    chmod +x start.sh
+    echo "✅ Created start.sh"
+fi
 
 echo ""
 echo "=================================="
@@ -157,5 +203,5 @@ echo "Or start components separately:"
 echo "  Backend:  ./start_backend.sh"
 echo "  Frontend: ./start_frontend.sh"
 echo ""
-echo "🎯 Competition Ready! Good luck on October 30!"
+echo "🎯 Ready to scan!"
 echo "=================================="
