@@ -21,6 +21,36 @@
   background: linear-gradient(180deg, #9333ea, #db2777);
 }
 
+/* Spider progress animations */
+@keyframes spider-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.spider-pulse {
+  animation: spider-pulse 2s infinite;
+}
+
+/* AJAX endpoint discovery animation */
+@keyframes ajax-discovery {
+  0% { transform: translateX(-10px); opacity: 0; }
+  100% { transform: translateX(0); opacity: 1; }
+}
+
+.ajax-discovery {
+  animation: ajax-discovery 0.5s ease-out;
+}
+
+/* Dynamic content indicator */
+@keyframes dynamic-content {
+  0%, 100% { background-color: rgba(59, 130, 246, 0.1); }
+  50% { background-color: rgba(59, 130, 246, 0.2); }
+}
+
+.dynamic-content {
+  animation: dynamic-content 3s infinite;
+}
+
 /* Animations */
 @keyframes fade-in {
   from {

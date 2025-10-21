@@ -5,6 +5,7 @@ from tools.advanced.chain_detector import ChainDetector
 from tools.advanced.business_logic import BusinessLogicScanner
 from tools.advanced.api_security import APISecurityScanner
 from tools.advanced.ai_analyzer import AIAnalyzer
+from tools.nmap_scanner import NmapScanner
 
 class ScanOrchestrator:
     """
@@ -22,6 +23,7 @@ class ScanOrchestrator:
         self.business_logic = BusinessLogicScanner(database, broadcaster)
         self.api_security = APISecurityScanner(database, broadcaster)
         self.ai_analyzer = AIAnalyzer(database, broadcaster)
+        self.nmap = NmapScanner(database, broadcaster)
     
     def execute_elite_scan(self, scan_id, target, scan_mode='elite'):
         """
@@ -38,9 +40,28 @@ class ScanOrchestrator:
         all_chains = []
         
         try:
-            # Phase 1: Deep Reconnaissance (0-20%)
-            self.broadcaster.broadcast_scan_progress(scan_id, 5, "🔍 Initiating Deep Reconnaissance")
+            # Phase 1: Deep Reconnaissance & Blueprinting (0-20%)
+            self.broadcaster.broadcast_scan_progress(scan_id, 3, "🔍 Initiating Recon & Blueprinting")
             recon_data = self.recon.deep_reconnaissance(scan_id, target)
+            try:
+                # Persist blueprint and OSINT
+                osint = {
+                    'subdomains': recon_data.get('subdomains', []),
+                    'live_hosts': recon_data.get('live_hosts', []),
+                    'technologies': recon_data.get('technologies', []),
+                    'api_definitions': recon_data.get('api_definitions', [])
+                }
+                self.db.set_recon_blueprint(scan_id, recon_data.get('blueprint', {}), osint)
+            except Exception:
+                pass
+
+            # Run Nmap discovery (low impact network mapping)
+            self.broadcaster.broadcast_scan_progress(scan_id, 12, "🌐 Network Discovery (Nmap)")
+            nmap_findings = self.nmap.scan_target(scan_id, target, intensity='normal')
+            for nf in nmap_findings:
+                self.broadcaster.broadcast_vulnerability_found(scan_id, nf)
+                self.db.add_vulnerability(scan_id, nf)
+
             self.broadcaster.broadcast_scan_progress(scan_id, 20, "✓ Reconnaissance Complete")
             self.broadcaster.broadcast_phase_complete(scan_id, "Reconnaissance", {
                 'subdomains': len(recon_data.get('subdomains', [])),

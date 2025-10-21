@@ -6,6 +6,12 @@ import ChainAlerts from './ChainAlerts';
 import ToolActivity from './ToolActivity';
 import StatsCards from './StatsCards';
 import ProgressBar from './ProgressBar';
+import Repeater from './Repeater';
+import ScanHistory from './ScanHistory';
+import BlueprintViewer from './BlueprintViewer';
+import SpiderProgress from './SpiderProgress';
+import ScannerIntegration from './ScannerIntegration';
+import ScanStatistics from './ScanStatistics';
 
 const Dashboard = () => {
   const { socket, connected } = useWebSocket();
@@ -21,6 +27,7 @@ const Dashboard = () => {
     medium: 0,
     low: 0
   });
+  const [currentScanId, setCurrentScanId] = useState(null);
 
   useEffect(() => {
     if (!socket) return;
@@ -37,6 +44,7 @@ const Dashboard = () => {
       setChains([]);
       setToolActivity([]);
       setStats({ critical: 0, high: 0, medium: 0, low: 0 });
+      setCurrentScanId(data.scan_id);
     });
 
     socket.on('scan_progress', (data) => {
@@ -94,6 +102,7 @@ const Dashboard = () => {
       setScanStatus('completed');
       setProgress(100);
       showCompletionNotification(data);
+      // Keep scanId for viewing results
     });
 
     socket.on('scan_error', (data) => {
@@ -140,7 +149,7 @@ const Dashboard = () => {
     }
   };
 
-  const startScan = (target, mode) => {
+  const startScan = (target, mode, options = {}) => {
     if (socket && connected) {
       if ('Notification' in window && Notification.permission === 'default') {
         Notification.requestPermission();
@@ -148,7 +157,11 @@ const Dashboard = () => {
       
       socket.emit('start_scan', {
         target: target,
-        mode: mode
+        mode: mode,
+        intensity: options.intensity || 'normal',
+        auth: options.auth || {},
+        policy: options.policy || {},
+        spiderConfig: options.spiderConfig || {}
       });
     } else {
       alert('Not connected to backend. Please check the connection.');
@@ -218,6 +231,9 @@ const Dashboard = () => {
           {/* Vulnerability Feed */}
           <div className="lg:col-span-2">
             <VulnerabilityFeed vulnerabilities={vulnerabilities} />
+            <div className="mt-6">
+              <ScanHistory />
+            </div>
           </div>
 
           {/* Sidebar */}
@@ -229,6 +245,20 @@ const Dashboard = () => {
             {chains.length > 0 && (
               <ChainAlerts chains={chains} />
             )}
+            {/* Repeater */}
+            <Repeater currentScanId={currentScanId} />
+            
+            {/* Blueprint Viewer */}
+            <BlueprintViewer scanId={currentScanId} />
+            
+            {/* Spider Progress */}
+            <SpiderProgress scanId={currentScanId} isActive={scanStatus === 'running'} />
+            
+            {/* Scanner Integration */}
+            <ScannerIntegration currentScanId={currentScanId} />
+            
+            {/* Scan Statistics */}
+            <ScanStatistics scanId={currentScanId} />
           </div>
         </div>
       </div>

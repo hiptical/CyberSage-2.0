@@ -2,7 +2,8 @@ import subprocess
 import json
 import time
 import requests
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urljoin
+from .ajax_spider import AjaxSpider
 
 class ReconEngine:
     """
@@ -12,8 +13,9 @@ class ReconEngine:
     def __init__(self, database, broadcaster):
         self.db = database
         self.broadcaster = broadcaster
+        self.ajax_spider = AjaxSpider(database, broadcaster)
     
-    def deep_reconnaissance(self, scan_id, target):
+    def deep_reconnaissance(self, scan_id, target, options=None):
         """
         Perform comprehensive reconnaissance
         """
@@ -23,6 +25,8 @@ class ReconEngine:
             'live_hosts': [],
             'technologies': [],
             'endpoints': [],
+            'blueprint': {},
+            'api_definitions': [],
             'has_api': False,
             'has_auth': False
         }
@@ -50,17 +54,32 @@ class ReconEngine:
         
         # Endpoint Discovery
         self.broadcaster.broadcast_tool_started(scan_id, 'Endpoint Crawling', target)
-        endpoints = self._discover_endpoints(scan_id, target)
-        recon_data['endpoints'] = endpoints
+        endpoints, blueprint = self._discover_endpoints(scan_id, target)
+        
+        # AJAX-aware crawling for JavaScript-heavy applications
+        self.broadcaster.broadcast_tool_started(scan_id, 'AJAX Spider', target)
+        ajax_endpoints = self.ajax_spider.crawl_ajax_aware(scan_id, target, max_depth=2, max_pages=30)
+        endpoints.extend(ajax_endpoints)
+        
+        # Remove duplicates and update
+        recon_data['endpoints'] = list(set(endpoints))
+        recon_data['blueprint'] = blueprint
         
         # Detect API endpoints
         api_endpoints = [ep for ep in endpoints if '/api/' in ep or ep.endswith('.json')]
         recon_data['has_api'] = len(api_endpoints) > 0
+
+        # API Definitions (swagger/openapi)
+        api_defs = self._discover_api_definitions(target)
+        if api_defs:
+            recon_data['api_definitions'] = api_defs
+            recon_data['has_api'] = True
         
         # Detect authentication
         recon_data['has_auth'] = self._detect_auth(target)
         
         self.broadcaster.broadcast_tool_completed(scan_id, 'Endpoint Crawling', 'success', len(endpoints))
+        self.broadcaster.broadcast_tool_completed(scan_id, 'AJAX Spider', 'success', len(ajax_endpoints))
         
         return recon_data
     
@@ -178,6 +197,7 @@ class ReconEngine:
         Enhanced endpoint discovery through aggressive crawling
         """
         endpoints = set()
+        blueprint = {}
         
         try:
             # Simple crawler
@@ -221,7 +241,6 @@ class ReconEngine:
                     if urlparse(target).netloc in full_url:
                         endpoints.add(full_url)
             
-            # Add common endpoints for testing platforms like testphp.vulnweb.com
             common_paths = [
                 '/search.php', '/login.php', '/artists.php', '/listproducts.php',
                 '/showimage.php', '/product.php', '/cart.php', '/guestbook.php',
@@ -243,10 +262,73 @@ class ReconEngine:
                 except:
                     # Even if HEAD fails, add it anyway for GET testing
                     endpoints.add(full_url)
+
+            # robots.txt
+            try:
+                robots_url = urljoin(target, '/robots.txt')
+                r = requests.get(robots_url, timeout=5, verify=False)
+                if r.status_code == 200:
+                    disallows = []
+                    for line in r.text.splitlines():
+                        if line.lower().startswith('disallow:'):
+                            path = line.split(':', 1)[1].strip()
+                            if path:
+                                u = urljoin(target, path)
+                                endpoints.add(u)
+                                disallows.append(u)
+                    blueprint['robots'] = disallows
+            except:
+                pass
+
+            # sitemap.xml
+            try:
+                sitemap_url = urljoin(target, '/sitemap.xml')
+                s = requests.get(sitemap_url, timeout=5, verify=False)
+                if s.status_code == 200:
+                    import re
+                    locs = re.findall(r'<loc>([^<]+)</loc>', s.text, re.IGNORECASE)
+                    site_urls = []
+                    for u in locs:
+                        if urlparse(target).netloc in u:
+                            endpoints.add(u)
+                            site_urls.append(u)
+                    blueprint['sitemap'] = site_urls
+            except:
+                pass
         except:
             pass
         
-        return list(endpoints)[:200]  # Increased limit to 200 endpoints
+        # Build simple hierarchical site tree by path depth
+        try:
+            tree = {}
+            for ep in endpoints:
+                path = urlparse(ep).path.strip('/').split('/') if urlparse(ep).path else []
+                node = tree
+                for part in path:
+                    if part not in node:
+                        node[part] = {}
+                    node = node[part]
+            blueprint['tree'] = tree
+        except:
+            blueprint['tree'] = {}
+
+        return list(endpoints)[:200], blueprint  # Increased limit to 200 endpoints
+
+    def _discover_api_definitions(self, base_url):
+        candidates = [
+            '/swagger.json', '/swagger/v1/swagger.json', '/v2/swagger.json',
+            '/openapi.json', '/openapi.yaml', '/openapi.yml', '/api-docs', '/api/docs'
+        ]
+        found = []
+        for path in candidates:
+            url = urljoin(base_url, path)
+            try:
+                r = requests.get(url, timeout=5, verify=False)
+                if r.status_code == 200 and len(r.text) > 0:
+                    found.append(url)
+            except:
+                continue
+        return found
     
     def _detect_auth(self, target):
         """

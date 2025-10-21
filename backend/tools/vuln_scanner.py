@@ -31,6 +31,12 @@ class VulnerabilityScanner:
         live_hosts = recon_data.get('live_hosts', [])
         endpoints = recon_data.get('endpoints', [])
         
+        # Passive Analysis prior to active probes
+        self.broadcaster.broadcast_tool_started(scan_id, 'Passive Analysis', target)
+        passive_vulns = self._passive_checks(scan_id, recon_data)
+        all_vulnerabilities.extend(passive_vulns)
+        self.broadcaster.broadcast_tool_completed(scan_id, 'Passive Analysis', 'success', len(passive_vulns))
+
         # XSS Scanning - ENHANCED
         self.broadcaster.broadcast_tool_started(scan_id, 'XSS Scanner', target)
         xss_vulns = self._scan_xss_advanced(scan_id, target, endpoints)
@@ -109,6 +115,112 @@ class VulnerabilityScanner:
             self.db.add_vulnerability(scan_id, vuln)
         
         return all_vulnerabilities
+
+    def _passive_checks(self, scan_id, recon_data):
+        """Passive header/cookie/dependency checks without malicious payloads"""
+        findings = []
+        live_hosts = recon_data.get('live_hosts', [])
+        for host in live_hosts[:10]:
+            url = host.get('url')
+            try:
+                resp = self.session.get(url, timeout=8)
+                # Cookie security
+                cookies = resp.cookies
+                for c in cookies:
+                    attrs = []
+                    if not getattr(c, 'secure', False):
+                        attrs.append('Secure')
+                    # httpOnly not exposed via requests cookies; infer via Set-Cookie header
+                    set_cookies = resp.headers.get('Set-Cookie', '')
+                    if c.name in set_cookies and 'httponly' not in set_cookies.lower():
+                        attrs.append('HttpOnly')
+                    if attrs:
+                        findings.append({
+                            'type': 'Cookie Security',
+                            'severity': 'medium',
+                            'title': f"Cookie '{c.name}' missing attributes: {', '.join(attrs)}",
+                            'description': 'Cookies should set Secure and HttpOnly flags to reduce risk.',
+                            'url': url,
+                            'confidence': 80,
+                            'tool': 'passive_analyzer',
+                            'poc': f"Set-Cookie: {c.name}=...; {resp.headers.get('Set-Cookie','')[:120]}",
+                            'remediation': 'Add Secure and HttpOnly to session cookies',
+                            'raw_data': {}
+                        })
+
+                # Cache-Control on sensitive pages
+                cache_control = resp.headers.get('Cache-Control', '')
+                page_lower = resp.text.lower()
+                sensitive_markers = any(x in page_lower for x in ['login', 'password', 'account', 'profile'])
+                if sensitive_markers and ('no-store' not in cache_control.lower() and 'private' not in cache_control.lower()):
+                    findings.append({
+                        'type': 'Caching Misconfiguration',
+                        'severity': 'medium',
+                        'title': 'Sensitive page missing no-store/private Cache-Control',
+                        'description': 'Sensitive pages should disable caching to prevent data exposure.',
+                        'url': url,
+                        'confidence': 60,
+                        'tool': 'passive_analyzer',
+                        'poc': f"Cache-Control: {cache_control}",
+                        'remediation': 'Add Cache-Control: no-store, private on sensitive pages',
+                        'raw_data': {'cache_control': cache_control}
+                    })
+
+                # Autocomplete on sensitive inputs
+                import re
+                forms = re.findall(r'<form[\s\S]*?>[\s\S]*?</form>', resp.text, re.IGNORECASE)
+                for form_html in forms[:20]:
+                    # Look for password inputs
+                    if re.search(r'<input[^>]*type=["\']password["\']', form_html, re.IGNORECASE):
+                        if 'autocomplete="off"' not in form_html.lower():
+                            findings.append({
+                                'type': 'Autocomplete Risk',
+                                'severity': 'low',
+                                'title': 'Password form missing autocomplete="off"',
+                                'description': 'Disable autocomplete on sensitive credential forms.',
+                                'url': url,
+                                'confidence': 70,
+                                'tool': 'passive_analyzer',
+                                'poc': form_html[:200],
+                                'remediation': 'Add autocomplete="off" to form or password inputs',
+                                'raw_data': {}
+                            })
+
+                # JS dependency versions in HTML
+                import re
+                scripts = re.findall(r'<script[^>]+src=["\']([^"\']+)["\']', resp.text, re.IGNORECASE)
+                for src in scripts[:50]:
+                    lower = src.lower()
+                    version = None
+                    lib = None
+                    m = re.search(r'jquery[-.](\d+\.\d+\.\d+)', lower)
+                    if m:
+                        lib = 'jQuery'
+                        version = m.group(1)
+                    m = m or re.search(r'angular[-.](\d+\.\d+\.\d+)', lower)
+                    if not lib and m:
+                        lib = 'AngularJS'
+                        version = m.group(1)
+                    m2 = re.search(r'bootstrap[-.](\d+\.\d+\.\d+)', lower)
+                    if not lib and m2:
+                        lib = 'Bootstrap'
+                        version = m2.group(1)
+                    if lib and version:
+                        findings.append({
+                            'type': 'Dependency Risk',
+                            'severity': 'medium',
+                            'title': f"{lib} {version} detected",
+                            'description': f"Detected {lib} version {version} which may have known CVEs depending on release date.",
+                            'url': url,
+                            'confidence': 40,
+                            'tool': 'passive_analyzer',
+                            'poc': src,
+                            'remediation': f"Review {lib} changelog and update to latest stable.",
+                            'raw_data': {'library': lib, 'version': version, 'src': src}
+                        })
+            except Exception:
+                continue
+        return findings
     
     def _scan_xss_advanced(self, scan_id, target, endpoints):
         """Enhanced XSS scanning with multiple payloads and contexts"""
@@ -142,14 +254,20 @@ class VulnerabilityScanner:
                         
                         if endpoint_data.get('method') == 'POST':
                             response = self.session.post(endpoint, data=test_params, timeout=10)
+                            method_used = 'POST'
+                            req_body = urlencode(test_params)
+                            req_url = endpoint
                         else:
                             response = self.session.get(endpoint, params=test_params, timeout=10)
+                            method_used = 'GET'
+                            req_body = ''
+                            req_url = requests.Request('GET', endpoint, params=test_params).prepare().url
                         
                         # Check if payload is reflected without encoding
                         if payload in response.text and response.status_code == 200:
                             # Verify it's in executable context
                             if self._verify_xss_executable(response.text, payload):
-                                vulnerabilities.append({
+                                vuln = {
                                     'type': 'XSS',
                                     'severity': 'high',
                                     'title': f'Reflected XSS in parameter: {param_name}',
@@ -160,7 +278,24 @@ class VulnerabilityScanner:
                                     'poc': f'Parameter: {param_name}\nPayload: {payload}\nMethod: {endpoint_data.get("method", "GET")}',
                                     'remediation': 'Implement proper output encoding/escaping for all user input',
                                     'raw_data': {'parameter': param_name, 'payload': payload, 'method': endpoint_data.get('method')}
-                                })
+                                }
+                                vulnerabilities.append(vuln)
+                                try:
+                                    # Log HTTP history
+                                    self.db.add_http_request(
+                                        scan_id,
+                                        method_used,
+                                        req_url,
+                                        "\n".join([f"{k}: {v}" for k, v in self.session.headers.items()]),
+                                        req_body,
+                                        response.status_code,
+                                        "\n".join([f"{k}: {v}" for k, v in response.headers.items()]),
+                                        response.text,
+                                        0,
+                                        None
+                                    )
+                                except Exception:
+                                    pass
                                 break  # Found, no need to test more payloads for this param
                     except Exception as e:
                         continue
@@ -219,13 +354,19 @@ class VulnerabilityScanner:
                         
                         if endpoint_data.get('method') == 'POST':
                             response = self.session.post(endpoint, data=test_params, timeout=10)
+                            method_used = 'POST'
+                            req_body = urlencode(test_params)
+                            req_url = endpoint
                         else:
                             response = self.session.get(endpoint, params=test_params, timeout=10)
+                            method_used = 'GET'
+                            req_body = ''
+                            req_url = requests.Request('GET', endpoint, params=test_params).prepare().url
                         
                         # Check for SQL errors
                         for pattern in error_patterns:
                             if re.search(pattern, response.text, re.IGNORECASE):
-                                vulnerabilities.append({
+                                vuln = {
                                     'type': 'SQL Injection',
                                     'severity': 'critical',
                                     'title': f'SQL Injection in parameter: {param_name}',
@@ -236,13 +377,29 @@ class VulnerabilityScanner:
                                     'poc': f'Parameter: {param_name}\nPayload: {payload}\nTechnique: {technique}\nError: {pattern}',
                                     'remediation': 'Use parameterized queries/prepared statements',
                                     'raw_data': {'parameter': param_name, 'payload': payload, 'technique': technique}
-                                })
+                                }
+                                vulnerabilities.append(vuln)
+                                try:
+                                    self.db.add_http_request(
+                                        scan_id,
+                                        method_used,
+                                        req_url,
+                                        "\n".join([f"{k}: {v}" for k, v in self.session.headers.items()]),
+                                        req_body,
+                                        response.status_code,
+                                        "\n".join([f"{k}: {v}" for k, v in response.headers.items()]),
+                                        response.text,
+                                        0,
+                                        None
+                                    )
+                                except Exception:
+                                    pass
                                 break
                         
                         # Check for boolean-based blind SQLi
                         if "'1'='1" in payload and response.status_code == 200:
                             if abs(len(response.text) - baseline_length) > 100:  # Significant difference
-                                vulnerabilities.append({
+                                vuln = {
                                     'type': 'SQL Injection',
                                     'severity': 'critical',
                                     'title': f'Blind SQL Injection in parameter: {param_name}',
@@ -253,7 +410,23 @@ class VulnerabilityScanner:
                                     'poc': f'Parameter: {param_name}\nPayload: {payload}\nResponse length changed significantly',
                                     'remediation': 'Use parameterized queries/prepared statements',
                                     'raw_data': {'parameter': param_name, 'payload': payload}
-                                })
+                                }
+                                vulnerabilities.append(vuln)
+                                try:
+                                    self.db.add_http_request(
+                                        scan_id,
+                                        method_used,
+                                        req_url,
+                                        "\n".join([f"{k}: {v}" for k, v in self.session.headers.items()]),
+                                        req_body,
+                                        response.status_code,
+                                        "\n".join([f"{k}: {v}" for k, v in response.headers.items()]),
+                                        response.text,
+                                        0,
+                                        None
+                                    )
+                                except Exception:
+                                    pass
                     except:
                         continue
         

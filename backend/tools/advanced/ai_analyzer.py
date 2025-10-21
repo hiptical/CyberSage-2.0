@@ -10,7 +10,7 @@ class AIAnalyzer:
     def __init__(self, database, broadcaster):
         self.db = database
         self.broadcaster = broadcaster
-        self.api_key = os.environ.get('OPENROUTER_API_KEY', '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')
+        self.api_key = os.environ.get('OPENROUTER_API_KEY', '')
         self.api_base = 'https://openrouter.ai/api/v1'
     
     def analyze(self, scan_id, scan_data):

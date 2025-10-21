@@ -3,6 +3,18 @@ import React, { useState } from 'react';
 const ScanControl = ({ onStartScan, scanStatus, connected }) => {
   const [target, setTarget] = useState('');
   const [scanMode, setScanMode] = useState('elite');
+  const [intensity, setIntensity] = useState('normal');
+  const [auth, setAuth] = useState({ username: '', password: '' });
+  const [policy, setPolicy] = useState({});
+  const [spiderConfig, setSpiderConfig] = useState({
+    maxDepth: 2,
+    maxPages: 30,
+    timeout: 10,
+    enableAjax: true,
+    enableForms: true,
+    enableButtons: true,
+    enableNetworkMonitoring: true
+  });
 
   const handleStartScan = (e) => {
     e.preventDefault();
@@ -17,7 +29,7 @@ const ScanControl = ({ onStartScan, scanStatus, connected }) => {
       return;
     }
     
-    onStartScan(target, scanMode);
+    onStartScan(target, scanMode, { intensity, auth, policy, spiderConfig });
   };
 
   const isScanning = scanStatus === 'running';
@@ -86,6 +98,127 @@ const ScanControl = ({ onStartScan, scanStatus, connected }) => {
             {scanMode === 'standard' && '~15 mins: Comprehensive scan'}
             {scanMode === 'elite' && '~30 mins: Advanced detection + AI analysis'}
           </p>
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-gray-300 mb-2">
+            Scan Intensity
+          </label>
+          <div className="grid grid-cols-3 gap-3">
+            <button
+              type="button"
+              onClick={() => setIntensity('light')}
+              disabled={isScanning}
+              className={`px-4 py-2 rounded-lg font-medium transition ${
+                intensity === 'light'
+                  ? 'bg-green-600 text-white'
+                  : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+              } disabled:opacity-50 disabled:cursor-not-allowed`}
+            >
+              🟢 Light
+            </button>
+            <button
+              type="button"
+              onClick={() => setIntensity('normal')}
+              disabled={isScanning}
+              className={`px-4 py-2 rounded-lg font-medium transition ${
+                intensity === 'normal'
+                  ? 'bg-yellow-600 text-white'
+                  : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+              } disabled:opacity-50 disabled:cursor-not-allowed`}
+            >
+              🟡 Normal
+            </button>
+            <button
+              type="button"
+              onClick={() => setIntensity('aggressive')}
+              disabled={isScanning}
+              className={`px-4 py-2 rounded-lg font-medium transition ${
+                intensity === 'aggressive'
+                  ? 'bg-red-600 text-white'
+                  : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+              } disabled:opacity-50 disabled:cursor-not-allowed`}
+            >
+              🔴 Aggressive
+            </button>
+          </div>
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-gray-300 mb-2">
+            Authentication (Optional)
+          </label>
+          <div className="grid grid-cols-2 gap-3">
+            <input
+              type="text"
+              value={auth.username}
+              onChange={(e) => setAuth(prev => ({ ...prev, username: e.target.value }))}
+              placeholder="Username"
+              disabled={isScanning}
+              className="px-3 py-2 bg-gray-900 border border-gray-600 rounded text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-purple-500 disabled:opacity-50"
+            />
+            <input
+              type="password"
+              value={auth.password}
+              onChange={(e) => setAuth(prev => ({ ...prev, password: e.target.value }))}
+              placeholder="Password"
+              disabled={isScanning}
+              className="px-3 py-2 bg-gray-900 border border-gray-600 rounded text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-purple-500 disabled:opacity-50"
+            />
+          </div>
+        </div>
+
+        {/* Spider Configuration */}
+        <div className="border-t border-gray-700 pt-4">
+          <h3 className="text-white font-semibold mb-3">🤖 AJAX Spider Settings</h3>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-gray-400 text-sm mb-1">Max Depth</label>
+              <input
+                type="number"
+                min="1"
+                max="5"
+                value={spiderConfig.maxDepth}
+                onChange={(e) => setSpiderConfig(prev => ({ ...prev, maxDepth: parseInt(e.target.value) }))}
+                disabled={isScanning}
+                className="w-full px-2 py-1 bg-gray-900 border border-gray-600 rounded text-white text-sm focus:outline-none focus:ring-1 focus:ring-purple-500 disabled:opacity-50"
+              />
+            </div>
+            <div>
+              <label className="block text-gray-400 text-sm mb-1">Max Pages</label>
+              <input
+                type="number"
+                min="10"
+                max="100"
+                value={spiderConfig.maxPages}
+                onChange={(e) => setSpiderConfig(prev => ({ ...prev, maxPages: parseInt(e.target.value) }))}
+                disabled={isScanning}
+                className="w-full px-2 py-1 bg-gray-900 border border-gray-600 rounded text-white text-sm focus:outline-none focus:ring-1 focus:ring-purple-500 disabled:opacity-50"
+              />
+            </div>
+          </div>
+          <div className="mt-3 space-y-2">
+            <label className="flex items-center space-x-2">
+              <input
+                type="checkbox"
+                checked={spiderConfig.enableAjax}
+                onChange={(e) => setSpiderConfig(prev => ({ ...prev, enableAjax: e.target.checked }))}
+                disabled={isScanning}
+                className="w-4 h-4 text-purple-600 bg-gray-900 border-gray-700 rounded focus:ring-purple-500 disabled:opacity-50"
+              />
+              <span className="text-gray-300 text-sm">Enable AJAX-aware crawling</span>
+            </label>
+            <label className="flex items-center space-x-2">
+              <input
+                type="checkbox"
+                checked={spiderConfig.enableForms}
+                onChange={(e) => setSpiderConfig(prev => ({ ...prev, enableForms: e.target.checked }))}
+                disabled={isScanning}
+                className="w-4 h-4 text-purple-600 bg-gray-900 border-gray-700 rounded focus:ring-purple-500 disabled:opacity-50"
+              />
+              <span className="text-gray-300 text-sm">Interact with forms</span>
+            </label>
+          </div>
         </div>
 
         <button

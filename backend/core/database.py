@@ -24,7 +24,7 @@ class Database:
             conn.close()
     
     def init_database(self):
-        """Initialize database schema"""
+        """Initialize enhanced database schema"""
         with self.get_connection() as conn:
             cursor = conn.cursor()
             
@@ -38,11 +38,14 @@ class Database:
                     error_message TEXT,
                     started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     completed_at TIMESTAMP,
-                    duration_seconds INTEGER
+                    duration_seconds INTEGER,
+                    total_requests INTEGER DEFAULT 0,
+                    total_endpoints_tested INTEGER DEFAULT 0,
+                    coverage_percentage REAL DEFAULT 0
                 )
             ''')
             
-            # Vulnerabilities table
+            # Vulnerabilities table - ENHANCED
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS vulnerabilities (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -54,10 +57,53 @@ class Database:
                     confidence_score INTEGER,
                     detection_tool TEXT,
                     affected_url TEXT,
+                    affected_parameter TEXT,
+                    payload TEXT,
                     proof_of_concept TEXT,
+                    request_raw TEXT,
+                    response_raw TEXT,
                     remediation TEXT,
+                    cwe_id TEXT,
+                    cvss_score REAL,
+                    exploitability TEXT,
                     raw_data TEXT,
+                    false_positive INTEGER DEFAULT 0,
+                    verified INTEGER DEFAULT 0,
                     detected_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (scan_id) REFERENCES scans(scan_id)
+                )
+            ''')
+            
+            # HTTP requests history (like Burp Repeater)
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS http_history (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    scan_id TEXT NOT NULL,
+                    method TEXT,
+                    url TEXT,
+                    request_headers TEXT,
+                    request_body TEXT,
+                    response_code INTEGER,
+                    response_headers TEXT,
+                    response_body TEXT,
+                    response_time_ms INTEGER,
+                    vulnerability_id INTEGER,
+                    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (scan_id) REFERENCES scans(scan_id),
+                    FOREIGN KEY (vulnerability_id) REFERENCES vulnerabilities(id)
+                )
+            ''')
+            
+            # Scan progress tracking
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS scan_progress (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    scan_id TEXT NOT NULL,
+                    phase TEXT,
+                    progress_percentage INTEGER,
+                    current_target TEXT,
+                    message TEXT,
+                    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     FOREIGN KEY (scan_id) REFERENCES scans(scan_id)
                 )
             ''')
@@ -78,7 +124,7 @@ class Database:
                 )
             ''')
             
-            # Tool logs table
+            # Tool logs table - ENHANCED
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS tool_logs (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -86,6 +132,8 @@ class Database:
                     tool_name TEXT,
                     target TEXT,
                     status TEXT,
+                    findings_count INTEGER DEFAULT 0,
+                    execution_time_ms INTEGER,
                     stdout TEXT,
                     stderr TEXT,
                     started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -94,7 +142,33 @@ class Database:
                 )
             ''')
             
-            print("[Database] Initialized successfully")
+            # Scan statistics
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS scan_statistics (
+                    scan_id TEXT PRIMARY KEY,
+                    endpoints_discovered INTEGER DEFAULT 0,
+                    parameters_tested INTEGER DEFAULT 0,
+                    payloads_sent INTEGER DEFAULT 0,
+                    vulnerabilities_found INTEGER DEFAULT 0,
+                    true_positives INTEGER DEFAULT 0,
+                    false_positives INTEGER DEFAULT 0,
+                    avg_response_time_ms INTEGER DEFAULT 0,
+                    FOREIGN KEY (scan_id) REFERENCES scans(scan_id)
+                )
+            ''')
+
+            # Recon blueprint / OSINT storage
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS recon_blueprints (
+                    scan_id TEXT PRIMARY KEY,
+                    blueprint_json TEXT,
+                    osint_json TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (scan_id) REFERENCES scans(scan_id)
+                )
+            ''')
+            
+            print("[Database] Enhanced schema initialized successfully")
     
     def create_scan(self, scan_id, target, scan_mode):
         """Create a new scan record"""
@@ -234,7 +308,114 @@ class Database:
                 chains.append(chain)
             return chains
     
-    def get_scan_stats(self, scan_id):
+    def add_http_request(self, scan_id, method, url, req_headers, req_body, 
+                        resp_code, resp_headers, resp_body, resp_time_ms, vuln_id=None):
+        """Log HTTP request/response for history (like Burp)"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                INSERT INTO http_history 
+                (scan_id, method, url, request_headers, request_body, 
+                 response_code, response_headers, response_body, response_time_ms, vulnerability_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (scan_id, method, url, req_headers, req_body[:10000], 
+                  resp_code, resp_headers, resp_body[:50000], resp_time_ms, vuln_id))
+            return cursor.lastrowid
+    
+    def log_scan_progress(self, scan_id, phase, progress, target, message):
+        """Log detailed scan progress"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                INSERT INTO scan_progress 
+                (scan_id, phase, progress_percentage, current_target, message)
+                VALUES (?, ?, ?, ?, ?)
+            ''', (scan_id, phase, progress, target, message))
+    
+    def update_scan_statistics(self, scan_id, **stats):
+        """Update scan statistics"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            
+            # Check if exists
+            cursor.execute('SELECT scan_id FROM scan_statistics WHERE scan_id = ?', (scan_id,))
+            exists = cursor.fetchone()
+            
+            if exists:
+                set_clauses = ', '.join([f"{k} = ?" for k in stats.keys()])
+                values = list(stats.values()) + [scan_id]
+                cursor.execute(f'UPDATE scan_statistics SET {set_clauses} WHERE scan_id = ?', values)
+            else:
+                columns = ', '.join(stats.keys())
+                placeholders = ', '.join(['?' for _ in stats])
+                cursor.execute(
+                    f'INSERT INTO scan_statistics (scan_id, {columns}) VALUES (?, {placeholders})',
+                    [scan_id] + list(stats.values())
+                )
+    
+    def get_http_history(self, scan_id, limit=100):
+        """Get HTTP request history"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT * FROM http_history 
+                WHERE scan_id = ? 
+                ORDER BY timestamp DESC 
+                LIMIT ?
+            ''', (scan_id, limit))
+            return [dict(row) for row in cursor.fetchall()]
+    
+    def get_scan_statistics(self, scan_id):
+        """Get detailed scan statistics"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('SELECT * FROM scan_statistics WHERE scan_id = ?', (scan_id,))
+            row = cursor.fetchone()
+            return dict(row) if row else {}
+    
+    def get_vulnerability_details(self, vuln_id):
+        """Get full vulnerability details including HTTP history"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('SELECT * FROM vulnerabilities WHERE id = ?', (vuln_id,))
+            vuln = dict(cursor.fetchone()) if cursor.fetchone() else None
+            
+            if vuln:
+                # Get associated HTTP requests
+                cursor.execute('''
+                    SELECT * FROM http_history 
+                    WHERE vulnerability_id = ? 
+                    ORDER BY timestamp DESC
+                ''', (vuln_id,))
+                vuln['http_history'] = [dict(row) for row in cursor.fetchall()]
+            
+            return vuln
+
+    def set_recon_blueprint(self, scan_id, blueprint: dict, osint: dict):
+        """Store or update recon blueprint and OSINT details as JSON"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            data_bp = json.dumps(blueprint or {})
+            data_os = json.dumps(osint or {})
+            cursor.execute('SELECT scan_id FROM recon_blueprints WHERE scan_id = ?', (scan_id,))
+            exists = cursor.fetchone()
+            if exists:
+                cursor.execute('UPDATE recon_blueprints SET blueprint_json = ?, osint_json = ? WHERE scan_id = ?', (data_bp, data_os, scan_id))
+            else:
+                cursor.execute('INSERT INTO recon_blueprints (scan_id, blueprint_json, osint_json) VALUES (?, ?, ?)', (scan_id, data_bp, data_os))
+
+    def get_recon_blueprint(self, scan_id):
+        """Fetch recon blueprint and OSINT details"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('SELECT blueprint_json, osint_json FROM recon_blueprints WHERE scan_id = ?', (scan_id,))
+            row = cursor.fetchone()
+            if not row:
+                return { 'blueprint': {}, 'osint': {} }
+            return {
+                'blueprint': json.loads(row['blueprint_json'] or '{}'),
+                'osint': json.loads(row['osint_json'] or '{}')
+            }
         """Get vulnerability statistics for a scan"""
         with self.get_connection() as conn:
             cursor = conn.cursor()
