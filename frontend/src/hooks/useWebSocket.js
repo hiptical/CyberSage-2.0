@@ -6,14 +6,12 @@ export const useWebSocket = () => {
   const [connected, setConnected] = useState(false);
 
   useEffect(() => {
-    // Determine backend URL
-    const backendUrl = process.env.REACT_APP_BACKEND_URL || 
-                       `${window.location.protocol}//${window.location.hostname}:5000`;
+    const backendUrl = process.env.REACT_APP_BACKEND_URL || 'http://localhost:5000';
     
-    console.log('Connecting to WebSocket:', backendUrl);
+    console.log('🔌 Connecting to WebSocket:', `${backendUrl}/scan`);
 
     const newSocket = io(`${backendUrl}/scan`, {
-      transports: ['websocket', 'polling'], // Try websocket first, fallback to polling
+      transports: ['websocket', 'polling'],
       reconnection: true,
       reconnectionDelay: 1000,
       reconnectionAttempts: 10,
