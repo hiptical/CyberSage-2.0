@@ -1,0 +1,325 @@
+# CyberSage v2.0 - Security Tools Configuration
+
+version: "2.0"
+last_updated: "2025-01-21"
+
+# Global Settings
+global:
+  timeout: 30
+  max_retries: 3
+  user_agent: "CyberSage/2.0 (Security Scanner)"
+  verify_ssl: false
+  max_threads: 10
+
+# Reconnaissance Tools
+reconnaissance:
+  subdomains:
+    enabled: true
+    tools:
+      - name: "subfinder"
+        path: "/usr/bin/subfinder"
+        timeout: 60
+        args: ["-silent", "-timeout", "60"]
+      - name: "dns_enumeration"
+        enabled: true
+        common_subdomains:
+          - www
+          - mail
+          - ftp
+          - admin
+          - api
+          - dev
+          - staging
+          - test
+          - blog
+          - shop
+          - portal
+          - vpn
+          - remote
+    
+  technology_detection:
+    enabled: true
+    detect_from:
+      - headers
+      - html_content
+      - javascript
+      - cookies
+    
+  endpoint_discovery:
+    enabled: true
+    methods:
+      - crawling
+      - robots_txt
+      - sitemap_xml
+      - common_paths
+    common_paths:
+      - /admin
+      - /login
+      - /api
+      - /dashboard
+      - /upload
+      - /search
+      - /user
+      - /profile
+      - /settings
+
+# Vulnerability Scanners
+vulnerability_scanners:
+  xss:
+    enabled: true
+    timeout: 10
+    payloads_per_parameter: 10
+    contexts:
+      - html
+      - attribute
+      - javascript
+      - url
+    
+  sql_injection:
+    enabled: true
+    timeout: 15
+    techniques:
+      - error_based
+      - boolean_blind
+      - time_based
+      - union_based
+    databases:
+      - mysql
+      - postgresql
+      - mssql
+      - oracle
+  
+  command_injection:
+    enabled: true
+    timeout: 15
+    separators:
+      - ";"
+      - "|"
+      - "&&"
+      - "`"
+      - "$("
+  
+  file_inclusion:
+    enabled: true
+    timeout: 10
+    types:
+      - lfi
+      - rfi
+    traversal_depth: 5
+  
+  directory_traversal:
+    enabled: true
+    timeout: 10
+    encodings:
+      - none
+      - url
+      - double_url
+      - unicode
+  
+  xxe:
+    enabled: true
+    timeout: 10
+    endpoints_to_test:
+      - xml
+      - soap
+      - rss
+  
+  open_redirect:
+    enabled: true
+    timeout: 5
+    test_domains:
+      - evil.com
+      - attacker.com
+
+# Advanced Scanners
+advanced_scanners:
+  business_logic:
+    enabled: true
+    tests:
+      race_conditions:
+        enabled: true
+        concurrent_requests: 50
+        timeout: 30
+      price_manipulation:
+        enabled: true
+        test_values:
+          - "-1"
+          - "0"
+          - "0.001"
+          - "99999"
+      authentication_bypass:
+        enabled: true
+        techniques:
+          - direct_access
+          - header_manipulation
+          - method_override
+      idor:
+        enabled: true
+        id_manipulation_range: 10
+  
+  api_security:
+    enabled: true
+    tests:
+      authentication:
+        enabled: true
+      rate_limiting:
+        enabled: true
+        requests: 100
+        time_window: 10
+      mass_assignment:
+        enabled: true
+      versioning:
+        enabled: true
+      graphql:
+        enabled: true
+        introspection: true
+        batch_queries: true
+  
+  ajax_spider:
+    enabled: true
+    headless: true
+    max_depth: 2
+    max_pages: 30
+    timeout: 10
+    features:
+      form_interaction: true
+      button_clicking: true
+      ajax_monitoring: true
+      network_monitoring: true
+    browser:
+      name: "chrome"
+      options:
+        - "--no-sandbox"
+        - "--disable-dev-shm-usage"
+        - "--disable-gpu"
+
+# Network Scanners
+network_scanners:
+  nmap:
+    enabled: true
+    path: "/usr/bin/nmap"
+    scan_types:
+      - service_version
+      - os_detection
+    timing:
+      stealth: "T2"
+      normal: "T3"
+      aggressive: "T4"
+    ports:
+      common: "80,443,8080,8443,3000,5000,8000"
+      full: "1-65535"
+
+# Security Headers
+security_checks:
+  headers:
+    enabled: true
+    required_headers:
+      - X-Frame-Options
+      - X-Content-Type-Options
+      - Strict-Transport-Security
+      - Content-Security-Policy
+      - X-XSS-Protection
+      - Referrer-Policy
+  
+  cors:
+    enabled: true
+    test_origins:
+      - "https://evil.com"
+      - "http://attacker.com"
+  
+  sensitive_files:
+    enabled: true
+    files:
+      - "/.git/config"
+      - "/.env"
+      - "/config.php"
+      - "/wp-config.php"
+      - "/backup.sql"
+      - "/database.sql"
+      - "/.aws/credentials"
+      - "/web.config"
+      - "/.htaccess"
+      - "/phpinfo.php"
+      - "/.DS_Store"
+      - "/composer.json"
+      - "/package.json"
+    
+  backup_files:
+    enabled: true
+    extensions:
+      - .bak
+      - .backup
+      - .old
+      - .copy
+      - .orig
+      - .tmp
+      - "~"
+      - .swp
+
+# Attack Chain Detection
+attack_chains:
+  enabled: true
+  patterns:
+    - name: "xss_to_session_hijack"
+      severity: "critical"
+      required:
+        - XSS
+      optional:
+        - CORS Misconfiguration
+        - Missing Security Header
+    
+    - name: "sqli_to_data_breach"
+      severity: "critical"
+      required:
+        - SQL Injection
+    
+    - name: "traversal_to_code_execution"
+      severity: "critical"
+      required:
+        - Directory Traversal
+      optional:
+        - Sensitive File Exposure
+    
+    - name: "cors_xss_combo"
+      severity: "high"
+      required:
+        - CORS Misconfiguration
+        - XSS
+
+# AI Analysis
+ai_analysis:
+  enabled: true
+  provider: "openrouter"
+  model: "mistralai/mistral-7b-instruct"
+  features:
+    severity_analysis: true
+    attack_surface: true
+    risk_calculation: true
+    recommendations: true
+  max_tokens: 500
+  temperature: 0.7
+
+# Reporting
+reporting:
+  formats:
+    - json
+    - pdf
+  pdf:
+    include_screenshots: false
+    include_http_history: true
+    max_history_entries: 50
+  retention_days: 30
+
+# Rate Limiting
+rate_limiting:
+  enabled: true
+  requests_per_minute: 100
+  burst_size: 50
+
+# Logging
+logging:
+  level: "INFO"
+  file: "logs/cybersage.log"
+  max_size_mb: 100
+  backup_count: 5
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"

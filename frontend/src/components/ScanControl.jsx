@@ -5,7 +5,7 @@ const ScanControl = ({ onStartScan, scanStatus, connected }) => {
   const [scanMode, setScanMode] = useState('elite');
   const [intensity, setIntensity] = useState('normal');
   const [auth, setAuth] = useState({ username: '', password: '' });
-  const [policy, setPolicy] = useState({});
+  // Removed unused setPolicy - policy can be added back when needed
   const [spiderConfig, setSpiderConfig] = useState({
     maxDepth: 2,
     maxPages: 30,
@@ -29,7 +29,8 @@ const ScanControl = ({ onStartScan, scanStatus, connected }) => {
       return;
     }
     
-    onStartScan(target, scanMode, { intensity, auth, policy, spiderConfig });
+    // Policy object can be added here if needed in the future
+    onStartScan(target, scanMode, { intensity, auth, policy: {}, spiderConfig });
   };
 
   const isScanning = scanStatus === 'running';
