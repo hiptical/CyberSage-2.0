@@ -22,46 +22,52 @@ class PDFReportGenerator:
     
     def _setup_custom_styles(self):
         """Setup custom paragraph styles"""
+        # Check if style exists before adding to prevent KeyError
+        
         # Title style
-        self.styles.add(ParagraphStyle(
-            name='CustomTitle',
-            parent=self.styles['Heading1'],
-            fontSize=24,
-            spaceAfter=30,
-            alignment=TA_CENTER,
-            textColor=colors.HexColor('#8B5CF6')
-        ))
+        if 'CustomTitle' not in self.styles:
+            self.styles.add(ParagraphStyle(
+                name='CustomTitle',
+                parent=self.styles['Heading1'],
+                fontSize=24,
+                spaceAfter=30,
+                alignment=TA_CENTER,
+                textColor=colors.HexColor('#8B5CF6')
+            ))
         
         # Subtitle style
-        self.styles.add(ParagraphStyle(
-            name='CustomSubtitle',
-            parent=self.styles['Heading2'],
-            fontSize=16,
-            spaceAfter=12,
-            textColor=colors.HexColor('#6B7280')
-        ))
+        if 'CustomSubtitle' not in self.styles:
+            self.styles.add(ParagraphStyle(
+                name='CustomSubtitle',
+                parent=self.styles['Heading2'],
+                fontSize=16,
+                spaceAfter=12,
+                textColor=colors.HexColor('#6B7280')
+            ))
         
         # Vulnerability title style
-        self.styles.add(ParagraphStyle(
-            name='VulnTitle',
-            parent=self.styles['Heading3'],
-            fontSize=14,
-            spaceAfter=6,
-            textColor=colors.HexColor('#EF4444')
-        ))
+        if 'VulnTitle' not in self.styles:
+            self.styles.add(ParagraphStyle(
+                name='VulnTitle',
+                parent=self.styles['Heading3'],
+                fontSize=14,
+                spaceAfter=6,
+                textColor=colors.HexColor('#EF4444')
+            ))
         
         # Code style
-        self.styles.add(ParagraphStyle(
-            name='Code',
-            parent=self.styles['Normal'],
-            fontSize=9,
-            fontName='Courier',
-            backColor=colors.HexColor('#1F2937'),
-            textColor=colors.HexColor('#F3F4F6'),
-            leftIndent=10,
-            rightIndent=10,
-            spaceAfter=6
-        ))
+        if 'Code' not in self.styles:
+            self.styles.add(ParagraphStyle(
+                name='Code',
+                parent=self.styles['Normal'],
+                fontSize=9,
+                fontName='Courier',
+                backColor=colors.HexColor('#1F2937'),
+                textColor=colors.HexColor('#F3F4F6'),
+                leftIndent=10,
+                rightIndent=10,
+                spaceAfter=6
+            ))
     
     def generate_scan_report(self, scan_data, vulnerabilities, chains, statistics, output_path):
         """
@@ -112,12 +118,14 @@ class PDFReportGenerator:
             ['Target:', scan_data.get('target', 'N/A')],
             ['Scan Mode:', scan_data.get('scan_mode', 'N/A').upper()],
             ['Status:', scan_data.get('status', 'N/A').upper()],
-            ['Started:', datetime.fromtimestamp(scan_data.get('started_at', 0)).strftime('%Y-%m-%d %H:%M:%S')],
-            ['Duration:', f"{scan_data.get('duration_seconds', 0):.1f} seconds"],
+            ['Started:', str(scan_data.get('started_at', 'N/A'))],
         ]
         
+        if scan_data.get('duration_seconds'):
+            scan_info.append(['Duration:', f"{scan_data.get('duration_seconds', 0):.1f} seconds"])
+        
         if scan_data.get('completed_at'):
-            scan_info.append(['Completed:', datetime.fromtimestamp(scan_data.get('completed_at')).strftime('%Y-%m-%d %H:%M:%S')])
+            scan_info.append(['Completed:', str(scan_data.get('completed_at', 'N/A'))])
         
         scan_table = Table(scan_info, colWidths=[1.5*inch, 4*inch])
         scan_table.setStyle(TableStyle([
@@ -256,13 +264,6 @@ class PDFReportGenerator:
         
         for i, vuln in enumerate(vulnerabilities, 1):
             # Vulnerability header
-            severity_color = {
-                'critical': colors.red,
-                'high': colors.orange,
-                'medium': colors.yellow,
-                'low': colors.blue
-            }.get(vuln.get('severity', 'low'), colors.gray)
-            
             elements.append(Paragraph(f"{i}. {vuln.get('type', 'Unknown Vulnerability')}", self.styles['VulnTitle']))
             
             # Vulnerability details
@@ -292,9 +293,10 @@ class PDFReportGenerator:
                 elements.append(Paragraph(vuln.get('description'), self.styles['Normal']))
             
             # Proof of concept
-            if vuln.get('proof_of_concept'):
+            if vuln.get('proof_of_concept') or vuln.get('poc'):
                 elements.append(Paragraph("Proof of Concept:", self.styles['Heading4']))
-                elements.append(Paragraph(vuln.get('proof_of_concept'), self.styles['Code']))
+                poc_text = vuln.get('proof_of_concept') or vuln.get('poc')
+                elements.append(Paragraph(str(poc_text)[:500], self.styles['Code']))
             
             # Remediation
             if vuln.get('remediation'):
@@ -319,7 +321,8 @@ class PDFReportGenerator:
             
             if chain.get('steps'):
                 elements.append(Paragraph("Exploitation Steps:", self.styles['Heading4']))
-                for j, step in enumerate(chain.get('steps', []), 1):
+                steps = chain.get('steps', [])
+                for j, step in enumerate(steps, 1):
                     if isinstance(step, (list, tuple)) and len(step) >= 2:
                         elements.append(Paragraph(f"{j}. {step[1]}", self.styles['Normal']))
                     else:
@@ -359,4 +362,3 @@ class PDFReportGenerator:
             elements.append(stats_table)
         
         return elements
-
