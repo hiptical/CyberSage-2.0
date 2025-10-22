@@ -1,125 +1,31 @@
 #!/bin/bash
 
-echo "=================================="
-echo "🧠 CyberSage v2.0 Setup Script"
-echo "=================================="
-echo ""
-
-# Check if Python3 is installed
-if ! command -v python3 &> /dev/null; then
-    echo "❌ Python3 is not installed. Please install Python 3.8 or higher."
-    exit 1
-fi
-
-echo "✅ Python3 found: $(python3 --version)"
-
-# Check if pip3 is installed
-if ! command -v pip3 &> /dev/null; then
-    echo "❌ pip3 is not installed. Please install pip3."
-    exit 1
-fi
-
-echo "✅ pip3 found"
-
-# Check if Node.js is installed
-if ! command -v node &> /dev/null; then
-    echo "❌ Node.js is not installed. Please install Node.js 14 or higher."
-    exit 1
-fi
-
-echo "✅ Node.js found: $(node --version)"
-
-# Backend Setup
-echo ""
-echo "📦 Setting up backend..."
-cd backend
-
-# Create virtual environment
-if [ ! -d "venv" ]; then
-    echo "Creating virtual environment..."
-    python3 -m venv venv
-fi
-
-# Activate virtual environment and install dependencies
-echo "Installing Python dependencies..."
-source venv/bin/activate
-pip install --upgrade pip
-
-# Install main requirements (not dev requirements to avoid line_profiler issue)
-echo "Installing production dependencies..."
-pip install -r requirements.txt
-
-# Create .env file if it doesn't exist
-if [ ! -f ".env" ]; then
-    echo "Creating .env file..."
-    cat > .env << EOF
-SECRET_KEY=cybersage_v2_secret_$(date +%s)
-# OPENROUTER_API_KEY=your_api_key_here
-EOF
-    echo "✅ .env file created"
-else
-    echo "✅ .env file already exists"
-fi
-
-deactivate
-cd ..
-
-# Frontend Setup
-echo ""
-echo "📦 Setting up frontend..."
-cd frontend
-
-# Install Node dependencies
-echo "Installing Node.js dependencies..."
-npm install
-
-# Create .env file if it doesn't exist
-if [ ! -f ".env" ]; then
-    echo "Creating frontend .env file..."
-    cat > .env << EOF
-REACT_APP_BACKEND_URL=http://localhost:5000
-EOF
-    echo "✅ Frontend .env file created"
-else
-    echo "✅ Frontend .env file already exists"
-fi
-
-cd ..
-
-# Create start scripts if they don't exist
-echo ""
-echo "📝 Creating start scripts..."
-
-# Backend start script
-if [ ! -f "start_backend.sh" ]; then
-    cat > start_backend.sh << 'EOF'
-#!/bin/bash
-cd backend
-source venv/bin/activate
-python app.py
-EOF
-    chmod +x start_backend.sh
-    echo "✅ Created start_backend.sh"
-fi
-
-# Frontend start script
-if [ ! -f "start_frontend.sh" ]; then
-    cat > start_frontend.sh << 'EOF'
-#!/bin/bash
-cd frontend
-npm start
-EOF
-    chmod +x start_frontend.sh
-    echo "✅ Created start_frontend.sh"
-fi
-
-# Combined start script
-if [ ! -f "start.sh" ]; then
-    cat > start.sh << 'EOF'
-#!/bin/bash
-
 echo "🚀 Starting CyberSage v2.0..."
 echo ""
+
+# Function to cleanup on exit
+cleanup() {
+    echo ""
+    echo "🛑 Stopping servers..."
+    if [ ! -z "$BACKEND_PID" ]; then
+        kill $BACKEND_PID 2>/dev/null
+        echo "Backend stopped"
+    fi
+    if [ ! -z "$FRONTEND_PID" ]; then
+        kill $FRONTEND_PID 2>/dev/null
+        echo "Frontend stopped"
+    fi
+    exit 0
+}
+
+# Trap Ctrl+C and errors
+trap cleanup INT TERM EXIT
+
+# Kill any existing processes
+echo "Cleaning up old processes..."
+pkill -f "python app.py" 2>/dev/null
+pkill -f "npm start" 2>/dev/null
+sleep 2
 
 # Check if virtual environment exists
 if [ ! -d "backend/venv" ]; then
@@ -127,8 +33,8 @@ if [ ! -d "backend/venv" ]; then
     exit 1
 fi
 
-# Start backend in background
-echo "Starting backend..."
+# Start Backend
+echo "📡 Starting backend..."
 cd backend
 source venv/bin/activate
 
@@ -139,16 +45,33 @@ if [ $? -ne 0 ]; then
     pip install -r requirements.txt
 fi
 
-python app.py &
+# Run backend in background but keep output visible
+python app.py 2>&1 | tee backend.log &
 BACKEND_PID=$!
 cd ..
 
-# Wait for backend to start
-echo "Waiting for backend to initialize..."
-sleep 5
+echo "⏳ Waiting for backend to start..."
+sleep 8
 
-# Start frontend
-echo "Starting frontend..."
+# Check if backend is actually running
+if ! kill -0 $BACKEND_PID 2>/dev/null; then
+    echo "❌ Backend failed to start!"
+    echo "Check backend.log for errors"
+    exit 1
+fi
+
+# Test backend health
+if curl -s http://localhost:5000/api/health > /dev/null 2>&1; then
+    echo "✅ Backend is running on http://localhost:5000"
+else
+    echo "❌ Backend not responding to health check"
+    echo "Backend PID: $BACKEND_PID"
+    echo "Check if port 5000 is already in use: sudo lsof -i :5000"
+    exit 1
+fi
+
+# Start Frontend
+echo "🎨 Starting frontend..."
 cd frontend
 
 # Check if node_modules exists
@@ -157,7 +80,7 @@ if [ ! -d "node_modules" ]; then
     npm install
 fi
 
-npm start &
+npm start 2>&1 | tee frontend.log &
 FRONTEND_PID=$!
 cd ..
 
@@ -169,39 +92,15 @@ echo ""
 echo "Backend:  http://localhost:5000"
 echo "Frontend: http://localhost:3000"
 echo ""
+echo "Backend PID:  $BACKEND_PID"
+echo "Frontend PID: $FRONTEND_PID"
+echo ""
+echo "Logs:"
+echo "  Backend:  backend/backend.log"
+echo "  Frontend: frontend/frontend.log"
+echo ""
 echo "Press Ctrl+C to stop both servers"
 echo ""
 
-# Function to cleanup on exit
-cleanup() {
-    echo ""
-    echo "Stopping servers..."
-    kill $BACKEND_PID 2>/dev/null
-    kill $FRONTEND_PID 2>/dev/null
-    exit 0
-}
-
-# Trap Ctrl+C
-trap cleanup INT
-
-# Wait for interrupt
+# Wait for processes
 wait
-EOF
-    chmod +x start.sh
-    echo "✅ Created start.sh"
-fi
-
-echo ""
-echo "=================================="
-echo "✅ Setup Complete!"
-echo "=================================="
-echo ""
-echo "To start CyberSage v2.0, run:"
-echo "  ./start.sh"
-echo ""
-echo "Or start components separately:"
-echo "  Backend:  ./start_backend.sh"
-echo "  Frontend: ./start_frontend.sh"
-echo ""
-echo "🎯 Ready to scan!"
-echo "=================================="
