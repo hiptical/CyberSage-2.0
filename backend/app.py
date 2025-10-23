@@ -1,10 +1,12 @@
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, send_file
 from flask_socketio import SocketIO, emit
 from flask_cors import CORS
 import threading
 import time
 import os
 from datetime import datetime
+import json
+import tempfile
 
 from core.database import Database
 from core.scan_orchestrator import ScanOrchestrator
@@ -16,7 +18,7 @@ from tools.integrations import ThirdPartyScannerIntegration
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'cybersage_v2_elite_secret_2024')
 
-# Enable CORS for all routes
+# Enable CORS
 CORS(app, resources={
     r"/*": {
         "origins": "*",
@@ -25,14 +27,13 @@ CORS(app, resources={
     }
 })
 
-# Create SocketIO instance with proper configuration
-# FIXED: Removed duplicate engineio_logger parameter
+# Create SocketIO instance
 socketio = SocketIO(
     app,
     cors_allowed_origins="*",
     async_mode='threading',
     logger=True,
-    engineio_logger=True,  # Only appears once now
+    engineio_logger=True,
     ping_timeout=60,
     ping_interval=25,
     allow_upgrades=True,
@@ -40,25 +41,14 @@ socketio = SocketIO(
 )
 
 # Initialize components
-print("[Init] Initializing database...")
 db = Database()
-
-print("[Init] Initializing broadcaster...")
 broadcaster = RealTimeBroadcaster(socketio)
-
-print("[Init] Initializing scan orchestrator...")
 scan_orchestrator = ScanOrchestrator(db, broadcaster)
-
-print("[Init] Initializing PDF generator...")
 pdf_generator = PDFReportGenerator()
-
-print("[Init] Initializing scanner integration...")
 scanner_integration = ThirdPartyScannerIntegration(db, broadcaster)
 
-# Store active scans
+# Store active scans with cancellation support
 active_scans = {}
-
-print("[Init] All components initialized successfully")
 
 # ============================================================================
 # REST API ENDPOINTS
@@ -80,9 +70,25 @@ def health():
         "status": "healthy",
         "active_scans": len(active_scans),
         "database": "connected",
-        "websocket": "enabled",
-        "socketio_version": "5.x"
+        "websocket": "enabled"
     })
+
+@app.route('/api/config', methods=['GET'])
+def get_config():
+    """Get API configuration"""
+    return jsonify({
+        "openrouter_api_key_configured": bool(os.environ.get('OPENROUTER_API_KEY')),
+        "ai_enabled": bool(os.environ.get('OPENROUTER_API_KEY'))
+    })
+
+@app.route('/api/config', methods=['POST'])
+def update_config():
+    """Update API configuration"""
+    data = request.get_json()
+    if 'openrouter_api_key' in data:
+        os.environ['OPENROUTER_API_KEY'] = data['openrouter_api_key']
+        return jsonify({"status": "success", "message": "API key updated"})
+    return jsonify({"status": "error", "message": "Invalid configuration"}), 400
 
 @app.route('/api/scans', methods=['GET'])
 def get_scans():
@@ -104,17 +110,34 @@ def get_scan_details(scan_id):
         "stats": db.get_scan_stats(scan_id)
     })
 
+@app.route('/api/scan/<scan_id>/cancel', methods=['POST'])
+def cancel_scan(scan_id):
+    """Cancel an active scan"""
+    if scan_id in active_scans:
+        active_scans[scan_id]['cancelled'] = True
+        db.update_scan_status(scan_id, 'cancelled')
+        broadcaster.broadcast_event('scan_cancelled', {
+            'scan_id': scan_id,
+            'timestamp': time.time()
+        })
+        return jsonify({"status": "success", "message": "Scan cancellation requested"})
+    return jsonify({"status": "error", "message": "Scan not found or already completed"}), 404
+
 @app.route('/api/scan/<scan_id>/export', methods=['GET'])
 def export_scan(scan_id):
     """Export scan results as JSON"""
     scan_data = db.get_scan_by_id(scan_id)
     vulnerabilities = db.get_vulnerabilities_by_scan(scan_id)
     chains = db.get_chains_by_scan(scan_id)
+    http_history = db.get_http_history(scan_id)
+    statistics = db.get_scan_statistics(scan_id)
     
     export_data = {
         "scan_info": scan_data,
         "vulnerabilities": vulnerabilities,
         "attack_chains": chains,
+        "http_history": http_history,
+        "statistics": statistics,
         "generated_at": datetime.now().isoformat(),
         "platform": "CyberSage v2.0"
     }
@@ -125,9 +148,6 @@ def export_scan(scan_id):
 def export_scan_pdf(scan_id):
     """Export scan results as PDF report"""
     try:
-        from flask import send_file
-        import tempfile
-        
         scan_data = db.get_scan_by_id(scan_id)
         vulnerabilities = db.get_vulnerabilities_by_scan(scan_id)
         chains = db.get_chains_by_scan(scan_id)
@@ -156,6 +176,48 @@ def export_scan_pdf(scan_id):
         
     except Exception as e:
         return jsonify({"error": f"PDF generation failed: {str(e)}"}), 500
+
+@app.route('/api/scan/import', methods=['POST'])
+def import_scan():
+    """Import scan results from JSON/XML file"""
+    try:
+        if 'file' not in request.files:
+            return jsonify({"error": "No file uploaded"}), 400
+        
+        file = request.files['file']
+        scanner_type = request.form.get('scanner_type', 'generic')
+        
+        content = file.read().decode('utf-8')
+        
+        # Parse based on scanner type
+        scan_id = f"import_{int(time.time())}"
+        db.create_scan(scan_id, f"Imported from {scanner_type}", 'import')
+        
+        if scanner_type == 'nmap':
+            scanner_integration.integrate_nmap_results(scan_id, content)
+        elif scanner_type == 'nessus':
+            data = json.loads(content)
+            scanner_integration.integrate_nessus_results(scan_id, data)
+        elif scanner_type == 'zap':
+            data = json.loads(content)
+            scanner_integration.integrate_owasp_zap_results(scan_id, data)
+        elif scanner_type == 'burp':
+            data = json.loads(content)
+            scanner_integration.integrate_burp_results(scan_id, data)
+        else:
+            data = json.loads(content)
+            scanner_integration.integrate_custom_scanner(scan_id, scanner_type, data)
+        
+        db.update_scan_status(scan_id, 'completed')
+        
+        return jsonify({
+            "status": "success",
+            "scan_id": scan_id,
+            "message": f"Successfully imported {scanner_type} results"
+        })
+        
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 @app.route('/api/scan/<scan_id>/history', methods=['GET'])
 def get_scan_history(scan_id):
@@ -246,7 +308,8 @@ def handle_connect():
         'status': 'ready',
         'message': 'Connected to CyberSage v2.0',
         'server_time': time.time(),
-        'version': '2.0'
+        'version': '2.0',
+        'ai_enabled': bool(os.environ.get('OPENROUTER_API_KEY'))
     })
 
 @socketio.on('disconnect', namespace='/scan')
@@ -270,22 +333,21 @@ def handle_start_scan(data):
         'intensity': data.get('intensity', 'normal'),
         'auth': data.get('auth', {}),
         'policy': data.get('policy', {}),
-        'spiderConfig': data.get('spiderConfig', {})
+        'spiderConfig': data.get('spiderConfig', {}),
+        'tools': data.get('tools', {})  # FIXED: Store selected tools
     }
     
     if not target:
         emit('error', {'message': 'Target is required'})
         return
     
-    # Generate scan ID
     scan_id = f"scan_{int(time.time())}_{target.replace('://', '_').replace('/', '_')[:30]}"
     
     print(f'[Scan] Starting scan {scan_id} for target: {target}')
+    print(f'[Scan] Selected tools: {options.get("tools")}')
     
-    # Create scan record
     db.create_scan(scan_id, target, scan_mode)
     
-    # Emit scan started
     emit('scan_started', {
         'scan_id': scan_id,
         'target': target,
@@ -305,7 +367,8 @@ def handle_start_scan(data):
         'target': target,
         'mode': scan_mode,
         'thread': scan_thread,
-        'started_at': time.time()
+        'started_at': time.time(),
+        'cancelled': False
     }
 
 def execute_scan_async(scan_id, target, scan_mode, options=None):
@@ -319,8 +382,19 @@ def execute_scan_async(scan_id, target, scan_mode, options=None):
             'message': 'Initializing CyberSage Elite Scanner...'
         })
         
-        # Execute the scan
-        results = scan_orchestrator.execute_elite_scan(scan_id, target, scan_mode)
+        # Execute the scan with cancellation support
+        results = scan_orchestrator.execute_elite_scan(
+            scan_id, 
+            target, 
+            scan_mode, 
+            options,
+            lambda: active_scans.get(scan_id, {}).get('cancelled', False)
+        )
+        
+        # Check if cancelled
+        if active_scans.get(scan_id, {}).get('cancelled', False):
+            print(f'[Scan] Scan {scan_id} was cancelled')
+            return
         
         # Update scan status
         db.update_scan_status(scan_id, 'completed')
@@ -357,6 +431,7 @@ def handle_stop_scan(data):
     scan_id = data.get('scan_id')
     
     if scan_id in active_scans:
+        active_scans[scan_id]['cancelled'] = True
         db.update_scan_status(scan_id, 'stopped')
         emit('scan_stopped', {'scan_id': scan_id})
         print(f'[Scan] Stopped scan {scan_id}')
@@ -371,23 +446,14 @@ if __name__ == '__main__':
     print("\n" + "=" * 80)
     print("🧠 CyberSage v2.0 - Elite Vulnerability Intelligence Platform")
     print("=" * 80)
-    try:
-        import flask
-        flask_version = getattr(flask, '__version__', '3.x')
-    except:
-        flask_version = '3.x'
-    print(f"[+] Flask version: {flask_version}")
-    print(f"[+] SocketIO: Enabled with polling & websocket")
-    print(f"[+] Server: http://0.0.0.0:5000")
-    print(f"[+] WebSocket namespace: /scan")
-    print(f"[+] CORS: Enabled (all origins)")
+    print(f"[+] Backend: http://0.0.0.0:5000")
+    print(f"[+] WebSocket: /scan namespace")
     print(f"[+] Database: {db.db_path}")
+    print(f"[+] AI Enabled: {bool(os.environ.get('OPENROUTER_API_KEY'))}")
     print("=" * 80)
     print("[+] ✅ Ready for connections!")
-    print("[+] Press Ctrl+C to stop the server")
     print("=" * 80 + "\n")
     
-    # Run the server
     socketio.run(
         app,
         host='0.0.0.0',
