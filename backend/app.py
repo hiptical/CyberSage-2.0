@@ -26,16 +26,20 @@ CORS(app, resources={
 })
 
 # Create SocketIO instance with proper configuration
+# In backend/app.py, update SocketIO initialization:
+
 socketio = SocketIO(
     app,
     cors_allowed_origins="*",
     async_mode='threading',
-    logger=False,
-    engineio_logger=False,
+    logger=True,
+    engineio_logger=True,
     ping_timeout=60,
     ping_interval=25,
     allow_upgrades=True,
-    transports=['polling', 'websocket']
+    transports=['polling', 'websocket'],
+    # IMPORTANT: Force Engine.IO v4 protocol (compatible with socket.io-client 4.x)
+    engineio_logger=True
 )
 
 # Initialize components
