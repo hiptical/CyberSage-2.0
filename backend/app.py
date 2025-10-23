@@ -370,15 +370,20 @@ if __name__ == '__main__':
     print("\n" + "=" * 80)
     print("🧠 CyberSage v2.0 - Elite Vulnerability Intelligence Platform")
     print("=" * 80)
-    print(f"[+] Flask version: {Flask.__version__}")
-    print(f"[+] SocketIO version: Enabled")
+    try:
+        import flask
+        flask_version = getattr(flask, '__version__', '3.x')
+    except:
+        flask_version = '3.x'
+    print(f"[+] Flask version: {flask_version}")
+    print(f"[+] SocketIO: Enabled with polling & websocket")
     print(f"[+] Server: http://0.0.0.0:5000")
     print(f"[+] WebSocket namespace: /scan")
     print(f"[+] CORS: Enabled (all origins)")
     print(f"[+] Database: {db.db_path}")
     print("=" * 80)
-    print("[+] Ready for connections!")
-    print("[+] Use Ctrl+C to stop the server")
+    print("[+] ✅ Ready for connections!")
+    print("[+] Press Ctrl+C to stop the server")
     print("=" * 80 + "\n")
     
     # Run the server
