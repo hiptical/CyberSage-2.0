@@ -2,8 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { io } from 'socket.io-client';
 
 // ============================================================================
-// COMPLETE CYBERSAGE V2.0 PROFESSIONAL APPLICATION
-// Single file with all components - no import errors
+// COMPLETE CYBERSAGE V2.0 - FULLY FIXED VERSION
 // ============================================================================
 
 const CyberSageApp = () => {
@@ -27,41 +26,59 @@ const CyberSageApp = () => {
   const [stats, setStats] = useState({ critical: 0, high: 0, medium: 0, low: 0 });
   const [correlations, setCorrelations] = useState([]);
 
-  // WebSocket setup
+  // WebSocket setup - FIXED
   useEffect(() => {
     const backendUrl = 'http://localhost:5000';
+    
+    console.log('[WebSocket] Attempting to connect to:', backendUrl);
+    
     const newSocket = io(`${backendUrl}/scan`, {
       transports: ['polling', 'websocket'],
       reconnection: true,
       reconnectionDelay: 1000,
       reconnectionAttempts: 10,
       timeout: 20000,
+      upgrade: true,
+      forceNew: true
     });
 
     newSocket.on('connect', () => {
-      console.log('✅ WebSocket Connected');
+      console.log('✅ WebSocket Connected - Socket ID:', newSocket.id);
       setConnected(true);
     });
 
-    newSocket.on('disconnect', () => {
-      console.log('❌ WebSocket Disconnected');
+    newSocket.on('disconnect', (reason) => {
+      console.log('❌ WebSocket Disconnected. Reason:', reason);
       setConnected(false);
     });
 
     newSocket.on('connect_error', (error) => {
-      console.error('Connection error:', error.message);
+      console.error('❌ Connection error:', error.message);
       setConnected(false);
     });
 
+    newSocket.on('error', (error) => {
+      console.error('❌ Socket error:', error);
+    });
+
     setSocket(newSocket);
-    return () => newSocket.close();
+    
+    return () => {
+      console.log('[WebSocket] Cleaning up connection');
+      newSocket.close();
+    };
   }, []);
 
   // WebSocket event handlers
   useEffect(() => {
     if (!socket) return;
 
+    socket.on('connected', (data) => {
+      console.log('[Backend] Connected:', data);
+    });
+
     socket.on('scan_started', (data) => {
+      console.log('[Scan] Started:', data);
       setScanStatus('running');
       setProgress(0);
       setVulnerabilities([]);
@@ -113,17 +130,20 @@ const CyberSageApp = () => {
       setChains(prev => [{ ...data, id: Date.now() }, ...prev]);
     });
 
-    socket.on('scan_completed', () => {
+    socket.on('scan_completed', (data) => {
+      console.log('[Scan] Completed:', data);
       setScanStatus('completed');
       setProgress(100);
     });
 
     socket.on('scan_error', (data) => {
+      console.error('[Scan] Error:', data);
       setScanStatus('error');
-      console.error('Scan error:', data.error);
+      alert(`Scan error: ${data.error}`);
     });
 
     return () => {
+      socket.off('connected');
       socket.off('scan_started');
       socket.off('scan_progress');
       socket.off('tool_started');
@@ -185,24 +205,27 @@ const CyberSageApp = () => {
 
   const startScan = (target, mode, options = {}) => {
     if (socket && connected) {
+      console.log('[Scan] Starting scan:', { target, mode, options });
       socket.emit('start_scan', {
         target,
         mode,
         intensity: options.intensity || 'normal',
         tools: options.tools || {
           nmap: true,
-          theHarvester: true,
-          amass: true,
+          theHarvester: false,  // Disabled by default
+          amass: false,
           whois: true,
-          ffuf: true,
-          gobuster: true,
-          sqlmap: true,
-          nikto: true,
-          wpscan: true,
-          nuclei: true,
+          ffuf: false,
+          gobuster: false,
+          sqlmap: false,
+          nikto: false,
+          wpscan: false,
+          nuclei: false,
           customScanner: true
         }
       });
+    } else {
+      alert('Not connected to backend. Please check if backend is running on http://localhost:5000');
     }
   };
 
@@ -280,7 +303,13 @@ const CyberSageApp = () => {
         {!connected && (
           <div className="mb-6 bg-red-900/30 border border-red-500 rounded-lg p-4">
             <p className="text-red-400 font-medium">
-              ⚠️ Backend not connected. Start backend: <code className="bg-black/30 px-2 py-1 rounded ml-2">cd backend && python app.py</code>
+              ⚠️ Backend not connected. Make sure the backend is running:
+            </p>
+            <code className="bg-black/30 px-2 py-1 rounded block mt-2 text-sm">
+              cd backend && source venv/bin/activate && python app.py
+            </code>
+            <p className="text-red-300 text-sm mt-2">
+              Backend should be accessible at: <strong>http://localhost:5000</strong>
             </p>
           </div>
         )}
@@ -419,12 +448,12 @@ const ScannerPage = ({ startScan, connected, scanStatus }) => {
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [tools, setTools] = useState({
     nmap: true,
-    theHarvester: true,
-    amass: true,
-    ffuf: true,
-    sqlmap: true,
-    nikto: true,
-    nuclei: true
+    theHarvester: false,
+    amass: false,
+    ffuf: false,
+    sqlmap: false,
+    nikto: false,
+    nuclei: false
   });
 
   const modes = [
@@ -432,6 +461,14 @@ const ScannerPage = ({ startScan, connected, scanStatus }) => {
     { id: 'standard', name: 'Standard', time: '15-30 min', desc: 'Comprehensive', icon: '🔍' },
     { id: 'elite', name: 'Elite', time: '30-60 min', desc: 'Full analysis', icon: '🧠' }
   ];
+
+  const handleStartScan = () => {
+    if (!target.trim()) {
+      alert('Please enter a target URL or domain');
+      return;
+    }
+    startScan(target, scanMode, { tools });
+  };
 
   return (
     <div className="max-w-4xl mx-auto space-y-6">
@@ -502,7 +539,7 @@ const ScannerPage = ({ startScan, connected, scanStatus }) => {
       </div>
 
       <button
-        onClick={() => startScan(target, scanMode, { tools })}
+        onClick={handleStartScan}
         disabled={!target || !connected || scanStatus === 'running'}
         className="w-full py-4 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 rounded-lg font-bold text-lg transition disabled:opacity-50 disabled:cursor-not-allowed"
       >
@@ -760,7 +797,6 @@ const RepeaterPage = ({ currentScanId }) => {
         <p className="text-gray-400">Manual HTTP request testing and exploit verification</p>
       </div>
       
-      {/* Request Builder */}
       <div className="bg-gray-900 rounded-xl border border-gray-800 p-6 space-y-4">
         <div className="flex space-x-2">
           <select
@@ -810,7 +846,6 @@ const RepeaterPage = ({ currentScanId }) => {
         </div>
       </div>
 
-      {/* Response Viewer */}
       {response && (
         <div className="bg-gray-900 rounded-xl border border-gray-800 p-6">
           <h3 className="text-lg font-bold mb-4">Response</h3>
@@ -863,7 +898,6 @@ const RepeaterPage = ({ currentScanId }) => {
         </div>
       )}
 
-      {/* Request History */}
       {history.length > 0 && (
         <div className="bg-gray-900 rounded-xl border border-gray-800 p-6">
           <h3 className="text-lg font-bold mb-4">Request History</h3>

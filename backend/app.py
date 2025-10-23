@@ -1,11 +1,10 @@
-from flask import Flask, render_template, jsonify, request
+from flask import Flask, jsonify, request
 from flask_socketio import SocketIO, emit
 from flask_cors import CORS
 import threading
 import time
 import os
 from datetime import datetime
-import requests
 
 from core.database import Database
 from core.scan_orchestrator import ScanOrchestrator
@@ -15,9 +14,20 @@ from tools.integrations import ThirdPartyScannerIntegration
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'cybersage_v2_elite_secret_2024')
+
+# CORS configuration - allow all origins for development
 CORS(app, resources={r"/*": {"origins": "*"}})
 
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading', ping_timeout=60, ping_interval=25)
+# SocketIO configuration with proper settings
+socketio = SocketIO(
+    app, 
+    cors_allowed_origins="*",
+    async_mode='threading',
+    ping_timeout=60,
+    ping_interval=25,
+    logger=True,
+    engineio_logger=True
+)
 
 # Initialize components
 db = Database()
@@ -43,7 +53,8 @@ def health():
     return jsonify({
         "status": "healthy",
         "active_scans": len(active_scans),
-        "database": "connected"
+        "database": "connected",
+        "websocket": "enabled"
     })
 
 @app.route('/api/scans', methods=['GET'])
@@ -87,7 +98,9 @@ def export_scan(scan_id):
 def export_scan_pdf(scan_id):
     """Export scan results as PDF report"""
     try:
-        # Get scan data
+        from flask import send_file
+        import tempfile
+        
         scan_data = db.get_scan_by_id(scan_id)
         vulnerabilities = db.get_vulnerabilities_by_scan(scan_id)
         chains = db.get_chains_by_scan(scan_id)
@@ -96,12 +109,9 @@ def export_scan_pdf(scan_id):
         if not scan_data:
             return jsonify({"error": "Scan not found"}), 404
         
-        # Create temporary PDF file
-        import tempfile
         with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp_file:
             pdf_path = tmp_file.name
         
-        # Generate PDF
         pdf_generator.generate_scan_report(
             scan_data, 
             vulnerabilities, 
@@ -110,8 +120,6 @@ def export_scan_pdf(scan_id):
             pdf_path
         )
         
-        # Return PDF file
-        from flask import send_file
         return send_file(
             pdf_path,
             as_attachment=True,
@@ -121,9 +129,10 @@ def export_scan_pdf(scan_id):
         
     except Exception as e:
         return jsonify({"error": f"PDF generation failed: {str(e)}"}), 500
+
 @app.route('/api/scan/<scan_id>/history', methods=['GET'])
 def get_scan_history(scan_id):
-    """Get HTTP request/response history (like Burp Repeater)"""
+    """Get HTTP request/response history"""
     history = db.get_http_history(scan_id)
     return jsonify({"history": history})
 
@@ -135,7 +144,7 @@ def get_scan_statistics(scan_id):
 
 @app.route('/api/scan/<scan_id>/blueprint', methods=['GET'])
 def get_scan_blueprint(scan_id):
-    """Get recon blueprint and OSINT details for a scan"""
+    """Get recon blueprint and OSINT details"""
     data = db.get_recon_blueprint(scan_id)
     return jsonify(data)
 
@@ -147,8 +156,10 @@ def get_vulnerability_details(vuln_id):
 
 @app.route('/api/repeater/send', methods=['POST'])
 def repeater_send():
-    """Manually send an HTTP request (Repeater-like) and record history"""
+    """Send HTTP request via Repeater"""
     try:
+        import requests
+        
         payload = request.get_json(force=True) or {}
         method = (payload.get('method') or 'GET').upper()
         url = payload.get('url')
@@ -197,10 +208,8 @@ def repeater_send():
         return jsonify({"error": str(e)}), 500
 
 # Third-Party Scanner Integration Endpoints
-
 @app.route('/api/integration/nmap', methods=['POST'])
 def integrate_nmap():
-    """Integrate Nmap scan results"""
     try:
         data = request.get_json()
         scan_id = data.get('scan_id')
@@ -216,13 +225,11 @@ def integrate_nmap():
             "vulnerabilities_added": len(vulnerabilities),
             "message": f"Integrated {len(vulnerabilities)} findings from Nmap"
         })
-        
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/integration/nessus', methods=['POST'])
 def integrate_nessus():
-    """Integrate Nessus scan results"""
     try:
         data = request.get_json()
         scan_id = data.get('scan_id')
@@ -238,13 +245,11 @@ def integrate_nessus():
             "vulnerabilities_added": len(vulnerabilities),
             "message": f"Integrated {len(vulnerabilities)} findings from Nessus"
         })
-        
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/integration/owasp-zap', methods=['POST'])
 def integrate_owasp_zap():
-    """Integrate OWASP ZAP scan results"""
     try:
         data = request.get_json()
         scan_id = data.get('scan_id')
@@ -260,13 +265,11 @@ def integrate_owasp_zap():
             "vulnerabilities_added": len(vulnerabilities),
             "message": f"Integrated {len(vulnerabilities)} findings from OWASP ZAP"
         })
-        
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/integration/burp', methods=['POST'])
 def integrate_burp():
-    """Integrate Burp Suite scan results"""
     try:
         data = request.get_json()
         scan_id = data.get('scan_id')
@@ -282,13 +285,11 @@ def integrate_burp():
             "vulnerabilities_added": len(vulnerabilities),
             "message": f"Integrated {len(vulnerabilities)} findings from Burp Suite"
         })
-        
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/integration/custom', methods=['POST'])
 def integrate_custom():
-    """Integrate custom scanner results"""
     try:
         data = request.get_json()
         scan_id = data.get('scan_id')
@@ -305,7 +306,6 @@ def integrate_custom():
             "vulnerabilities_added": len(vulnerabilities),
             "message": f"Integrated {len(vulnerabilities)} findings from {scanner_name}"
         })
-        
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -331,7 +331,8 @@ def handle_start_scan(data):
     options = {
         'intensity': data.get('intensity', 'normal'),
         'auth': data.get('auth', {}),
-        'policy': data.get('policy', {})
+        'policy': data.get('policy', {}),
+        'spiderConfig': data.get('spiderConfig', {})
     }
     
     if not target:
@@ -391,6 +392,9 @@ def execute_scan_async(scan_id, target, scan_mode, options=None):
         
     except Exception as e:
         print(f"[ERROR] Scan failed: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        
         db.update_scan_status(scan_id, 'failed', str(e))
         
         broadcaster.broadcast_event('scan_error', {
@@ -418,14 +422,17 @@ if __name__ == '__main__':
     print("=" * 60)
     print("🧠 CyberSage v2.0 - Elite Vulnerability Intelligence Platform")
     print("=" * 60)
-    print(f"[+] Starting server...")
+    print(f"[+] Starting server on http://0.0.0.0:5000")
     print(f"[+] WebSocket endpoint: /scan")
     print(f"[+] Ready for connections!")
     print("=" * 60)
     
-    socketio.run(app, 
-                 host='0.0.0.0', 
-                 port=5000, 
-                 debug=True,
-                 use_reloader=False,
-                 allow_unsafe_werkzeug=True)
+    # Run with proper settings
+    socketio.run(
+        app, 
+        host='0.0.0.0', 
+        port=5000, 
+        debug=False,  # Set to False to avoid double loading
+        use_reloader=False,
+        allow_unsafe_werkzeug=True
+    )

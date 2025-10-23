@@ -45,7 +45,7 @@ class Database:
                 )
             ''')
             
-            # Vulnerabilities table - ENHANCED
+            # Vulnerabilities table
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS vulnerabilities (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -74,7 +74,7 @@ class Database:
                 )
             ''')
             
-            # HTTP requests history (like Burp Repeater)
+            # HTTP requests history
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS http_history (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -124,7 +124,7 @@ class Database:
                 )
             ''')
             
-            # Tool logs table - ENHANCED
+            # Tool logs table
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS tool_logs (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -310,7 +310,7 @@ class Database:
     
     def add_http_request(self, scan_id, method, url, req_headers, req_body, 
                         resp_code, resp_headers, resp_body, resp_time_ms, vuln_id=None):
-        """Log HTTP request/response for history (like Burp)"""
+        """Log HTTP request/response"""
         with self.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute('''
@@ -378,7 +378,8 @@ class Database:
         with self.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute('SELECT * FROM vulnerabilities WHERE id = ?', (vuln_id,))
-            vuln = dict(cursor.fetchone()) if cursor.fetchone() else None
+            row = cursor.fetchone()
+            vuln = dict(row) if row else None
             
             if vuln:
                 # Get associated HTTP requests
@@ -416,6 +417,8 @@ class Database:
                 'blueprint': json.loads(row['blueprint_json'] or '{}'),
                 'osint': json.loads(row['osint_json'] or '{}')
             }
+
+    def get_scan_stats(self, scan_id):
         """Get vulnerability statistics for a scan"""
         with self.get_connection() as conn:
             cursor = conn.cursor()
@@ -437,6 +440,7 @@ class Database:
             
             # Get chain count
             cursor.execute('SELECT COUNT(*) as chain_count FROM attack_chains WHERE scan_id = ?', (scan_id,))
-            stats['attack_chains'] = cursor.fetchone()['chain_count']
+            chain_row = cursor.fetchone()
+            stats['attack_chains'] = chain_row['chain_count'] if chain_row else 0
             
             return stats
