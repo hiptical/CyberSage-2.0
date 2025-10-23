@@ -2,8 +2,9 @@ import { useState, useEffect } from 'react';
 import { io } from 'socket.io-client';
 
 /**
- * Custom WebSocket Hook for CyberSage v2.0
- * Automatically detects backend URL and handles reconnection
+ * Dynamic WebSocket Hook for CyberSage v2.0
+ * Works with: localhost, SSH tunnels, Netbird VPN, homelab, any network
+ * Auto-discovers backend regardless of network topology
  */
 export const useWebSocket = () => {
   const [socket, setSocket] = useState(null);
@@ -12,48 +13,48 @@ export const useWebSocket = () => {
   const [backendUrl, setBackendUrl] = useState(null);
 
   useEffect(() => {
-    // Dynamic backend URL detection with auto-discovery
+    // Dynamic backend URL detection - works ANYWHERE
     const detectBackendUrl = async () => {
       const possibleUrls = [];
 
-      // Priority 1: Environment variable
+      // Priority 1: Environment variable (manual override)
       if (process.env.REACT_APP_BACKEND_URL) {
         possibleUrls.push(process.env.REACT_APP_BACKEND_URL);
       }
 
-      // Priority 2: Same host (production deployment)
+      // Priority 2: Same host as frontend (most common case)
+      // Works for: SSH tunnels, Netbird, same machine, etc.
       const currentHost = window.location.hostname;
       const currentProtocol = window.location.protocol;
       possibleUrls.push(`${currentProtocol}//${currentHost}:5000`);
 
       // Priority 3: Localhost variations (development)
-      if (currentHost === 'localhost' || currentHost === '127.0.0.1') {
-        possibleUrls.push('http://localhost:5000');
-        possibleUrls.push('http://127.0.0.1:5000');
-      }
+      possibleUrls.push('http://localhost:5000');
+      possibleUrls.push('http://127.0.0.1:5000');
 
-      // Priority 4: Local network discovery (if frontend is on different machine)
-      const ipMatch = currentHost.match(/^(\d+\.\d+\.\d+)\.\d+$/);
-      if (ipMatch) {
-        const networkPrefix = ipMatch[1];
-        // Try common gateway IPs in the same subnet
-        for (let i = 1; i <= 254; i++) {
-          if (i !== parseInt(currentHost.split('.')[3])) {
-            possibleUrls.push(`http://${networkPrefix}.${i}:5000`);
-          }
-        }
-      }
+      // Priority 4: WebSocket-specific URLs (some proxies need ws://)
+      possibleUrls.push(`ws://${currentHost}:5000`);
+      possibleUrls.push(`wss://${currentHost}:5000`);
+
+      console.log('[WebSocket] Testing backend URLs:', possibleUrls);
 
       // Test each URL to find working backend
       for (const url of possibleUrls) {
         try {
-          console.log(`[WebSocket] Testing backend at: ${url}`);
+          // Normalize URL (remove ws:// prefix for fetch)
+          const testUrl = url.replace(/^wss?:\/\//, 'http://');
+          
+          console.log(`[WebSocket] Testing: ${testUrl}/api/health`);
+          
           const controller = new AbortController();
-          const timeoutId = setTimeout(() => controller.abort(), 2000);
+          const timeoutId = setTimeout(() => controller.abort(), 3000); // 3s timeout
 
-          const response = await fetch(`${url}/api/health`, {
+          const response = await fetch(`${testUrl}/api/health`, {
             signal: controller.signal,
-            mode: 'cors'
+            mode: 'cors',
+            headers: {
+              'Accept': 'application/json'
+            }
           });
 
           clearTimeout(timeoutId);
@@ -61,68 +62,93 @@ export const useWebSocket = () => {
           if (response.ok) {
             const data = await response.json();
             if (data.status === 'healthy') {
-              console.log(`✅ [WebSocket] Found backend at: ${url}`);
-              return url;
+              // Found working backend!
+              const finalUrl = testUrl;
+              console.log(`✅ [WebSocket] Backend discovered at: ${finalUrl}`);
+              console.log(`✅ [WebSocket] Backend info:`, data);
+              return finalUrl;
             }
           }
         } catch (error) {
           // Silently continue to next URL
+          // Only log if it's not a timeout/network error
+          if (error.name !== 'AbortError') {
+            console.debug(`[WebSocket] ${url} - ${error.message}`);
+          }
         }
       }
 
-      // Fallback to localhost
-      console.warn('[WebSocket] No backend found, using localhost fallback');
-      return 'http://localhost:5000';
+      // Fallback: use same host (will fail gracefully if backend not running)
+      const fallback = `${window.location.protocol}//${window.location.hostname}:5000`;
+      console.warn(`⚠️ [WebSocket] No backend found, using fallback: ${fallback}`);
+      console.warn(`⚠️ [WebSocket] Make sure backend is running on port 5000`);
+      return fallback;
     };
 
     // Initialize connection
     const initializeSocket = async () => {
       const discoveredUrl = await detectBackendUrl();
       setBackendUrl(discoveredUrl);
-      console.log('[WebSocket] Connecting to:', discoveredUrl);
+      
+      console.log('[WebSocket] Initializing connection to:', discoveredUrl);
 
-      // Create socket connection with proper configuration
-      // Using Socket.IO v4 protocol (EIO=4)
+      // Create socket connection with smart configuration
       const newSocket = io(`${discoveredUrl}/scan`, {
-        transports: ['polling', 'websocket'],
+        transports: ['polling', 'websocket'], // Try polling first, upgrade to websocket
         reconnection: true,
         reconnectionDelay: 1000,
         reconnectionDelayMax: 5000,
         reconnectionAttempts: 10,
         timeout: 20000,
         upgrade: true,
-        forceNew: true,
+        forceNew: false,  // Reuse existing connection if available
         autoConnect: true,
         withCredentials: false,
         path: '/socket.io',
-        // Force Socket.IO v4 protocol
-        extraHeaders: {
-          'Accept': 'application/json'
+        // Force Socket.IO v4 protocol (EIO=4)
+        query: {
+          EIO: '4',
+          transport: 'polling'
         }
       });
 
       // Connection event handlers
       newSocket.on('connect', () => {
-        console.log('✅ [WebSocket] Connected - Socket ID:', newSocket.id);
-        console.log('✅ [WebSocket] Backend URL:', discoveredUrl);
-        console.log('✅ [WebSocket] Transport:', newSocket.io.engine.transport.name);
+        console.log('✅ [WebSocket] Connected successfully!');
+        console.log('   Socket ID:', newSocket.id);
+        console.log('   Backend URL:', discoveredUrl);
+        console.log('   Transport:', newSocket.io.engine.transport.name);
+        console.log('   Protocol:', 'EIO=4 (Socket.IO v4)');
         setConnected(true);
         setReconnecting(false);
       });
 
       newSocket.on('disconnect', (reason) => {
-        console.log('❌ [WebSocket] Disconnected. Reason:', reason);
+        console.log('❌ [WebSocket] Disconnected');
+        console.log('   Reason:', reason);
         setConnected(false);
+        
         if (reason === 'io server disconnect') {
-          // Server disconnected, need to manually reconnect
+          // Server disconnected, manually reconnect
+          console.log('🔄 [WebSocket] Server disconnected, reconnecting...');
           setTimeout(() => newSocket.connect(), 1000);
         }
       });
 
       newSocket.on('connect_error', (error) => {
-        console.error('❌ [WebSocket] Connection error:', error.message);
-        console.error('   Attempted URL:', discoveredUrl);
-        console.error('   Error type:', error.type);
+        console.error('❌ [WebSocket] Connection error');
+        console.error('   Error:', error.message);
+        console.error('   Type:', error.type);
+        console.error('   Description:', error.description);
+        console.error('   Backend URL:', discoveredUrl);
+        
+        // Check if it's a protocol mismatch
+        if (error.message.includes('unsupported version')) {
+          console.error('   ⚠️ Protocol mismatch detected!');
+          console.error('   Frontend expects: Socket.IO v4 (EIO=4)');
+          console.error('   Backend might be using different version');
+        }
+        
         setConnected(false);
         setReconnecting(true);
       });
@@ -140,6 +166,7 @@ export const useWebSocket = () => {
 
       newSocket.on('reconnect_failed', () => {
         console.error('❌ [WebSocket] Reconnection failed after all attempts');
+        console.error('   Check if backend is running on:', discoveredUrl);
         setConnected(false);
         setReconnecting(false);
       });
@@ -155,7 +182,10 @@ export const useWebSocket = () => {
 
       // Backend-specific events
       newSocket.on('connected', (data) => {
-        console.log('🎉 [Backend] Connected event received:', data);
+        console.log('🎉 [Backend] Connected event received');
+        console.log('   Status:', data.status);
+        console.log('   Message:', data.message);
+        console.log('   Version:', data.version);
       });
 
       setSocket(newSocket);
@@ -170,7 +200,7 @@ export const useWebSocket = () => {
     initializeSocket();
   }, []);
 
-  // Helper function to check connection health
+  // Helper: Check connection health
   const checkConnection = () => {
     if (socket && socket.connected) {
       socket.emit('ping');
@@ -179,7 +209,7 @@ export const useWebSocket = () => {
     return false;
   };
 
-  // Helper function to manually reconnect
+  // Helper: Manual reconnect
   const reconnect = () => {
     if (socket) {
       console.log('[WebSocket] Manual reconnection triggered');
@@ -187,9 +217,22 @@ export const useWebSocket = () => {
     }
   };
 
-  // Helper function to get current backend URL
+  // Helper: Get current backend URL
   const getBackendUrl = () => {
     return backendUrl;
+  };
+
+  // Helper: Get connection info for debugging
+  const getConnectionInfo = () => {
+    if (!socket) return null;
+    
+    return {
+      connected: socket.connected,
+      id: socket.id,
+      backendUrl: backendUrl,
+      transport: socket.io?.engine?.transport?.name,
+      protocol: 'EIO=4 (Socket.IO v4)'
+    };
   };
 
   return { 
@@ -198,6 +241,7 @@ export const useWebSocket = () => {
     reconnecting,
     checkConnection,
     reconnect,
-    backendUrl: getBackendUrl()
+    backendUrl: getBackendUrl(),
+    connectionInfo: getConnectionInfo()
   };
 };
