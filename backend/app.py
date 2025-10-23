@@ -12,32 +12,56 @@ from core.realtime_broadcaster import RealTimeBroadcaster
 from core.pdf_generator import PDFReportGenerator
 from tools.integrations import ThirdPartyScannerIntegration
 
+# Create Flask app
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'cybersage_v2_elite_secret_2024')
 
-# CORS configuration - allow all origins for development
-CORS(app, resources={r"/*": {"origins": "*"}})
+# Enable CORS for all routes
+CORS(app, resources={
+    r"/*": {
+        "origins": "*",
+        "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+        "allow_headers": ["Content-Type", "Authorization"]
+    }
+})
 
-# SocketIO configuration with proper settings
+# Create SocketIO instance with proper configuration
 socketio = SocketIO(
-    app, 
+    app,
     cors_allowed_origins="*",
     async_mode='threading',
+    logger=False,
+    engineio_logger=False,
     ping_timeout=60,
     ping_interval=25,
-    logger=True,
-    engineio_logger=True
+    allow_upgrades=True,
+    transports=['polling', 'websocket']
 )
 
 # Initialize components
+print("[Init] Initializing database...")
 db = Database()
+
+print("[Init] Initializing broadcaster...")
 broadcaster = RealTimeBroadcaster(socketio)
+
+print("[Init] Initializing scan orchestrator...")
 scan_orchestrator = ScanOrchestrator(db, broadcaster)
+
+print("[Init] Initializing PDF generator...")
 pdf_generator = PDFReportGenerator()
+
+print("[Init] Initializing scanner integration...")
 scanner_integration = ThirdPartyScannerIntegration(db, broadcaster)
 
 # Store active scans
 active_scans = {}
+
+print("[Init] All components initialized successfully")
+
+# ============================================================================
+# REST API ENDPOINTS
+# ============================================================================
 
 @app.route('/')
 def index():
@@ -45,7 +69,8 @@ def index():
         "status": "online",
         "version": "2.0",
         "name": "CyberSage Elite",
-        "timestamp": datetime.now().isoformat()
+        "timestamp": datetime.now().isoformat(),
+        "websocket": "enabled"
     })
 
 @app.route('/api/health')
@@ -54,7 +79,8 @@ def health():
         "status": "healthy",
         "active_scans": len(active_scans),
         "database": "connected",
-        "websocket": "enabled"
+        "websocket": "enabled",
+        "socketio_version": "5.x"
     })
 
 @app.route('/api/scans', methods=['GET'])
@@ -207,125 +233,36 @@ def repeater_send():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-# Third-Party Scanner Integration Endpoints
-@app.route('/api/integration/nmap', methods=['POST'])
-def integrate_nmap():
-    try:
-        data = request.get_json()
-        scan_id = data.get('scan_id')
-        nmap_output = data.get('nmap_output', '')
-        
-        if not scan_id:
-            return jsonify({"error": "scan_id is required"}), 400
-        
-        vulnerabilities = scanner_integration.integrate_nmap_results(scan_id, nmap_output)
-        
-        return jsonify({
-            "status": "success",
-            "vulnerabilities_added": len(vulnerabilities),
-            "message": f"Integrated {len(vulnerabilities)} findings from Nmap"
-        })
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+# ============================================================================
+# WEBSOCKET EVENT HANDLERS
+# ============================================================================
 
-@app.route('/api/integration/nessus', methods=['POST'])
-def integrate_nessus():
-    try:
-        data = request.get_json()
-        scan_id = data.get('scan_id')
-        nessus_data = data.get('nessus_data', {})
-        
-        if not scan_id:
-            return jsonify({"error": "scan_id is required"}), 400
-        
-        vulnerabilities = scanner_integration.integrate_nessus_results(scan_id, nessus_data)
-        
-        return jsonify({
-            "status": "success",
-            "vulnerabilities_added": len(vulnerabilities),
-            "message": f"Integrated {len(vulnerabilities)} findings from Nessus"
-        })
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-@app.route('/api/integration/owasp-zap', methods=['POST'])
-def integrate_owasp_zap():
-    try:
-        data = request.get_json()
-        scan_id = data.get('scan_id')
-        zap_data = data.get('zap_data', {})
-        
-        if not scan_id:
-            return jsonify({"error": "scan_id is required"}), 400
-        
-        vulnerabilities = scanner_integration.integrate_owasp_zap_results(scan_id, zap_data)
-        
-        return jsonify({
-            "status": "success",
-            "vulnerabilities_added": len(vulnerabilities),
-            "message": f"Integrated {len(vulnerabilities)} findings from OWASP ZAP"
-        })
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-@app.route('/api/integration/burp', methods=['POST'])
-def integrate_burp():
-    try:
-        data = request.get_json()
-        scan_id = data.get('scan_id')
-        burp_data = data.get('burp_data', {})
-        
-        if not scan_id:
-            return jsonify({"error": "scan_id is required"}), 400
-        
-        vulnerabilities = scanner_integration.integrate_burp_results(scan_id, burp_data)
-        
-        return jsonify({
-            "status": "success",
-            "vulnerabilities_added": len(vulnerabilities),
-            "message": f"Integrated {len(vulnerabilities)} findings from Burp Suite"
-        })
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-@app.route('/api/integration/custom', methods=['POST'])
-def integrate_custom():
-    try:
-        data = request.get_json()
-        scan_id = data.get('scan_id')
-        scanner_name = data.get('scanner_name', 'custom')
-        results = data.get('results', {})
-        
-        if not scan_id:
-            return jsonify({"error": "scan_id is required"}), 400
-        
-        vulnerabilities = scanner_integration.integrate_custom_scanner(scan_id, scanner_name, results)
-        
-        return jsonify({
-            "status": "success",
-            "vulnerabilities_added": len(vulnerabilities),
-            "message": f"Integrated {len(vulnerabilities)} findings from {scanner_name}"
-        })
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-# WebSocket Events
 @socketio.on('connect', namespace='/scan')
 def handle_connect():
-    print(f'[WebSocket] Client connected: {request.sid}')
+    """Handle client connection"""
+    print(f'✅ [WebSocket] Client connected: {request.sid}')
     emit('connected', {
         'status': 'ready',
         'message': 'Connected to CyberSage v2.0',
-        'timestamp': time.time()
+        'server_time': time.time(),
+        'version': '2.0'
     })
 
 @socketio.on('disconnect', namespace='/scan')
 def handle_disconnect():
-    print(f'[WebSocket] Client disconnected: {request.sid}')
+    """Handle client disconnection"""
+    print(f'❌ [WebSocket] Client disconnected: {request.sid}')
+
+@socketio.on('ping', namespace='/scan')
+def handle_ping():
+    """Handle ping from client"""
+    emit('pong', {'timestamp': time.time()})
 
 @socketio.on('start_scan', namespace='/scan')
 def handle_start_scan(data):
     """Start a new security scan"""
+    print(f'[WebSocket] Received start_scan request: {data}')
+    
     target = data.get('target')
     scan_mode = data.get('mode', 'elite')
     options = {
@@ -341,6 +278,8 @@ def handle_start_scan(data):
     
     # Generate scan ID
     scan_id = f"scan_{int(time.time())}_{target.replace('://', '_').replace('/', '_')[:30]}"
+    
+    print(f'[Scan] Starting scan {scan_id} for target: {target}')
     
     # Create scan record
     db.create_scan(scan_id, target, scan_mode)
@@ -371,6 +310,8 @@ def handle_start_scan(data):
 def execute_scan_async(scan_id, target, scan_mode, options=None):
     """Execute scan asynchronously"""
     try:
+        print(f'[Scan] Executing scan {scan_id}')
+        
         broadcaster.broadcast_event('scan_status', {
             'scan_id': scan_id,
             'status': 'running',
@@ -390,8 +331,10 @@ def execute_scan_async(scan_id, target, scan_mode, options=None):
             'timestamp': time.time()
         })
         
+        print(f'[Scan] Completed scan {scan_id}')
+        
     except Exception as e:
-        print(f"[ERROR] Scan failed: {str(e)}")
+        print(f"[ERROR] Scan {scan_id} failed: {str(e)}")
         import traceback
         traceback.print_exc()
         
@@ -415,24 +358,35 @@ def handle_stop_scan(data):
     if scan_id in active_scans:
         db.update_scan_status(scan_id, 'stopped')
         emit('scan_stopped', {'scan_id': scan_id})
+        print(f'[Scan] Stopped scan {scan_id}')
     else:
         emit('error', {'message': 'Scan not found or already completed'})
 
+# ============================================================================
+# MAIN
+# ============================================================================
+
 if __name__ == '__main__':
-    print("=" * 60)
+    print("\n" + "=" * 80)
     print("🧠 CyberSage v2.0 - Elite Vulnerability Intelligence Platform")
-    print("=" * 60)
-    print(f"[+] Starting server on http://0.0.0.0:5000")
-    print(f"[+] WebSocket endpoint: /scan")
-    print(f"[+] Ready for connections!")
-    print("=" * 60)
+    print("=" * 80)
+    print(f"[+] Flask version: {Flask.__version__}")
+    print(f"[+] SocketIO version: Enabled")
+    print(f"[+] Server: http://0.0.0.0:5000")
+    print(f"[+] WebSocket namespace: /scan")
+    print(f"[+] CORS: Enabled (all origins)")
+    print(f"[+] Database: {db.db_path}")
+    print("=" * 80)
+    print("[+] Ready for connections!")
+    print("[+] Use Ctrl+C to stop the server")
+    print("=" * 80 + "\n")
     
-    # Run with proper settings
+    # Run the server
     socketio.run(
-        app, 
-        host='0.0.0.0', 
-        port=5000, 
-        debug=False,  # Set to False to avoid double loading
+        app,
+        host='0.0.0.0',
+        port=5000,
+        debug=False,
         use_reloader=False,
         allow_unsafe_werkzeug=True
     )
